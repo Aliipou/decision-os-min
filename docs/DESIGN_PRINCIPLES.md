@@ -87,3 +87,30 @@ first*, then the enterprise/research track adds capability (distribution,
 integration, notary, formal proofs) *around* the same behavior. The two versions
 must never diverge in what a given `(policy, action)` decides. Keeping this core
 small is what makes that single-source-of-truth rule enforceable.
+
+## 8. Every claim carries evidence
+
+No security or performance claim stands on assertion. Each must have one of: a
+**test**, a runnable **PoC**, a **benchmark**, a **formal argument**, or
+**external validation** — and where evidence is missing, the docs say so plainly
+(e.g. the unmeasured-clean speedup in [DESIGN_NOTE](DESIGN_NOTE_single_signature.md),
+the "not proven useful" caveats in [COMPARISON.md](COMPARISON.md)). Every
+vulnerability found becomes a permanent **regression test**, not just a fix.
+
+## 9. Removability
+
+Every capability *outside the kernel* must be removable without breaking the core.
+The advisor is optional; the HTTP service is an optional extra; plugins are
+separate repos that *consume* the core and never modify it. If a module has no
+evidence of value, it can be deleted with no effect on what the kernel decides.
+This is what keeps the kernel from accreting into a framework.
+
+## 10. Strict layering, no authority bypass
+
+Each layer depends only on the layer below it, and **no layer may bypass the
+authority of a layer beneath it.** An advisor cannot reach past the kernel to the
+executor; the executor cannot decide; a plugin cannot mint a token. Authority
+flows one way — down from the single signer — and there are no cyclic
+dependencies through which authority could leak. Enforced by the [authority
+graph](AUTHORITY_MODEL.md): only the kernel holds the key, and every lower layer
+verifies rather than trusts.
