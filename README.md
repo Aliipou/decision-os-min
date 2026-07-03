@@ -47,6 +47,31 @@ model — in ~400 lines, stdlib + `cryptography` only.
 the same gates across separate services; here they are collapsed into one call —
 fewer layers, same gate-passes.
 
+## Adopt it in one line — the forced path
+
+The wedge: **safe tool execution for production AI agents.** Wrap a tool once and
+there is **no way to call it that skips the kernel** — the wrapped callable *is*
+the governed tool:
+
+```python
+from decision_os_min import Governor, set_actor, GovernanceRefused
+
+gov = Governor(policy, audit_path="audit.jsonl")
+
+@gov.tool("send_email", capability="tool:send_email", purpose="support_reply",
+          data_labels=["customer_support"])
+def send_email(to: str, body: str) -> str:
+    ...                         # only ever runs if the kernel permits it
+
+set_actor("agent:bot")          # your app sets the agent identity (admission)
+send_email(to="x", body="y")    # decide -> audit -> execute, or GovernanceRefused
+```
+
+Or govern a whole agent-framework tool registry at once with `gov.wrap(tools, specs=...)`.
+Removing governance means deleting the wrapper and losing your audit trail — the
+friction runs the right way. (You still can't *force* the wider ecosystem with
+code; that's adoption. But inside any app that adopts it, there is no bypass.)
+
 ## Security Guarantees (proven in `tests/`)
 
 - **Single authority** — only the kernel's Ed25519-signed decisions authorize anything.

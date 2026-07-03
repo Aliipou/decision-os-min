@@ -41,7 +41,16 @@ __all__ = [
     "CapabilityToken",
     "AuditEntry",
     "Verdict",
+    "Governor",
+    "GovernanceRefused",
+    "set_actor",
+    "current_actor",
 ]
+
+
+# The forced-path adoption surface (governed tools). Imported last: govern.py
+# consumes DecisionOS (defined above) lazily, so there is no import cycle.
+from .govern import GovernanceRefused, Governor, current_actor, set_actor  # noqa: E402
 
 
 @dataclass
