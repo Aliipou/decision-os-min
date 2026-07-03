@@ -47,11 +47,13 @@ model — in ~400 lines, stdlib + `cryptography` only.
 the same gates across separate services; here they are collapsed into one call —
 fewer layers, same gate-passes.
 
-## Adopt it in one line — the forced path
+## Govern your agent's tools — signed authorization + audit
 
-The wedge: **safe tool execution for production AI agents.** Wrap a tool once and
-there is **no way to call it that skips the kernel** — the wrapped callable *is*
-the governed tool:
+The wedge: **safe tool execution for production AI agents.** You write a policy
+once and wrap your tool registry; from then on there is **no way to call a tool
+that skips the kernel** — the wrapped callable *is* the governed tool. (Not
+literally "one line": you define a policy, create a `Governor`, wrap your tools,
+and set the agent identity — a handful of lines, shown below.)
 
 ```python
 from decision_os_min import Governor, set_actor, GovernanceRefused
@@ -71,6 +73,17 @@ Or govern a whole agent-framework tool registry at once with `gov.wrap(tools, sp
 Removing governance means deleting the wrapper and losing your audit trail — the
 friction runs the right way. (You still can't *force* the wider ecosystem with
 code; that's adoption. But inside any app that adopts it, there is no bypass.)
+
+### Who this is for — and who it isn't
+
+**For you if:** you run AI agents (or are about to) that hold **sensitive tools** —
+email, payments, files, internal APIs — and you need *authorization + a
+non-repudiable audit trail* on what they do. That's the pain this solves.
+
+**Not for you (yet) if:** your agents only do read-only / harmless things, or you
+have no compliance/audit need — then this is overhead you don't need, and OPA/Cedar
+or your own middleware may fit better. That's an honest answer, and knowing it is
+more useful than a star.
 
 ## Security Guarantees (proven in `tests/`)
 
