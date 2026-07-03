@@ -25,6 +25,16 @@ from .audit import HashLog
 from .contracts import Action, AuditEntry, CapabilityToken, Decision, Verdict
 from .execute import ExecutionRefused, Executor
 from .kernel import Kernel, action_fingerprint, verify
+from .plugins import (
+    ContextPlugin,
+    Enrichment,
+    HeuristicRiskPlugin,
+    PIIContextPlugin,
+    RiskAssessment,
+    RiskPlugin,
+    apply_context,
+    risk_advisor,
+)
 
 __all__ = [
     "DecisionOS",
@@ -45,6 +55,15 @@ __all__ = [
     "GovernanceRefused",
     "set_actor",
     "current_actor",
+    # plugin SDK (one stable contract; no plugin holds authority)
+    "RiskPlugin",
+    "ContextPlugin",
+    "RiskAssessment",
+    "Enrichment",
+    "risk_advisor",
+    "apply_context",
+    "HeuristicRiskPlugin",
+    "PIIContextPlugin",
 ]
 
 
