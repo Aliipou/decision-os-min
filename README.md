@@ -4,6 +4,11 @@
 core security invariants in a single package while dramatically reducing
 architectural complexity.**
 
+> **What "OS" means here:** an *execution-governance / decision-enforcement layer*
+> — the authority + audit plane for an agent's tool calls — **not** an operating
+> system in the classic sense. It's a research-*oriented* architecture: its
+> advantages over existing tools are not yet proven by independent evaluation.
+
 ```python
 from decision_os_min import DecisionOS
 

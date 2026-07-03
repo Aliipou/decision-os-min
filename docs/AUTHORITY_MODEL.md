@@ -10,11 +10,18 @@ or records — never decides.
 
 | Component | May DECIDE (emit a verdict)? | May EXECUTE an effect? | May WRITE audit? | Holds the signing key? |
 |---|:--:|:--:|:--:|:--:|
-| **Admission** (capability grants; a future AuthGate) | ❌ | ❌ | ❌ | ❌ |
+| **Admission Gate** (identity/auth; capability grants) | ❌ | ❌ | ❌ | ❌ |
 | **Advisor** (FDK / ML / research) | ❌ *advice only* | ❌ | ❌ | ❌ |
-| **Kernel** | ✅ **sole authority** | ❌ | ❌ | ✅ (Ed25519, kernel-only) |
-| **Executor / PEP** | ❌ | ✅ *only vs a signed decision + unspent token* | ❌ | ❌ (verify only) |
+| **Decision Kernel** | ✅ **sole authority** | ❌ | ❌ | ✅ (Ed25519, kernel-only) |
+| **Policy Enforcement Point (PEP)** (`Executor`) | ❌ | ✅ *only vs a signed decision + unspent token* | ❌ | ❌ (verify only) |
 | **Audit log** | ❌ | ❌ | append-only | ❌ |
+
+Canonical pipeline (two *distinct* gate names — never "AuthGate" twice):
+
+```text
+Planner → Admission Gate → Advisor(optional) → Decision Kernel → PEP → Execution → Audit
+          (may reject entry)  (advice only)     (SOLE authority)  (enforce only)
+```
 
 There is **one** row with a ✅ in the "DECIDE" column. That is the whole safety
 argument.
@@ -24,16 +31,17 @@ argument.
 In the full pipeline `AuthGate` shows up at two points, and this is the naming
 confusion worth killing:
 
-- **Admission** (front): *"may this principal enter the system at all?"* — identity
-  / authentication. It can only **reject entry**; it cannot allow an action.
-- **PEP** (back): *"enforce the kernel's already-signed decision before the side
-  effect."* — it can only **refuse or carry out** what the kernel decided.
+- **Admission Gate** (front): *"may this principal enter the system at all?"* —
+  identity / authentication. It can only **reject entry**; it cannot allow an action.
+- **Policy Enforcement Point (PEP)** (back): *"enforce the kernel's already-signed
+  decision before the side effect."* — it can only **refuse or carry out** what the
+  kernel decided.
 
 **Neither is an authority.** One gate guards the door, the other guards the effect;
-the *decision* between them belongs solely to the kernel. Calling both "AuthGate"
-invites the "dual decision layer" misreading — so in `decision-os-min` they are
-named distinctly (admission = capability grants in the policy; enforcement =
-`Executor`), and only the `Kernel` decides.
+the *decision* between them belongs solely to the Decision Kernel. Reusing the name
+"AuthGate" for both invites the "dual decision layer" misreading — so the two are
+named distinctly (**Admission Gate** = capability grants in the policy; **PEP** =
+`Executor`), and only the kernel decides.
 
 ## Security invariants (formal, each with its proof)
 
