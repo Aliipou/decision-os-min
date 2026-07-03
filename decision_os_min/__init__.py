@@ -25,6 +25,7 @@ from .audit import HashLog
 from .contracts import Action, AuditEntry, CapabilityToken, Decision, Verdict
 from .execute import ExecutionRefused, Executor
 from .kernel import Kernel, action_fingerprint, verify
+from .paradigm import LegitimacyAuthorityPipeline
 from .plugins import (
     ContextPlugin,
     Enrichment,
@@ -64,6 +65,7 @@ __all__ = [
     "apply_context",
     "HeuristicRiskPlugin",
     "PIIContextPlugin",
+    "LegitimacyAuthorityPipeline",
 ]
 
 
