@@ -90,6 +90,14 @@ docker run -p 8080:8080 -v $PWD/policy.json:/config/policy.json \
 **This is a *starter*, not production-grade.** Auth, TLS, rate limiting, and
 horizontal scale belong at the ingress in front of it (see Out of Scope).
 
+## Extending it (plugins)
+
+The kernel is fixed; capability grows in plugins *around* it. A plugin is just a
+package that fits a **seam** (advisor, signer, policy-compiler, identity-verifier,
+tool-adapter) — and may advise/adapt/provide a backend, but **never decide or
+bypass the kernel**. See [`docs/PLUGIN_API.md`](docs/PLUGIN_API.md) for the stable
+contract. No plugin framework to learn — it's the library model.
+
 ## Out of Scope (use the full Decision OS for these)
 
 - Distributed deployment / multi-node consensus
