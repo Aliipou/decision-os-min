@@ -9,6 +9,12 @@ architectural complexity.**
 > system in the classic sense. It's a research-*oriented* architecture: its
 > advantages over existing tools are not yet proven by independent evaluation.
 
+> **Value-neutral by design.** This is a *policy runtime*, not a worldview. Any
+> normative framework — GDPR, HIPAA, the EU AI Act, ISO 42001, NIST AI RMF, or a
+> research theory — sits *on top* of it as an enforceable, auditable **policy**.
+> The kernel decides nothing on its own; it enforces the policy you give it. The
+> runtime is the *bottom* layer, not the top.
+
 ```python
 from decision_os_min import DecisionOS
 
