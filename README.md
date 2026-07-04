@@ -15,6 +15,14 @@ architectural complexity.**
 > The kernel decides nothing on its own; it enforces the policy you give it. The
 > runtime is the *bottom* layer, not the top.
 
+> **Legitimacy ⊥ Authority.** `LegitimacyAuthorityPipeline` (shipped here) puts a
+> DENY-only *legitimacy* gate — "should this happen at all?" (the FDK role) — in
+> front of the kernel's *authority* — "does this actor hold the capability?".
+> **Invariant, enforced by structure:** legitimacy may only DENY (it returns just
+> `(ok, reason)`, never a grant); authority never overrides a legitimacy denial.
+> The legitimacy *rule* is injected policy — never baked into the kernel. A
+> proposed architecture, not a proven paradigm.
+
 ```python
 from decision_os_min import DecisionOS
 
