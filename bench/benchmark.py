@@ -144,7 +144,7 @@ def make_benches(tmpdir: Path):
         k = Kernel(POLICY)
         actions = [fresh_action(i) for i in range(n)]
         results = [k.decide(actions[i]) for i in range(n)]
-        ex = Executor(k.public_key_hex())
+        ex = Executor(k.public_key_hex(), HashLog(tmpdir / "bench_exec_audit.jsonl"))
         return {"ex": ex, "actions": actions, "results": results}
 
     def do_execute(ctx, i):

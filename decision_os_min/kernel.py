@@ -39,18 +39,79 @@ def _canonical(obj: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
 
 
+class UnfingerprintablePayload(TypeError):
+    """A payload value is not a JSON primitive, so it cannot be safely committed
+    to by the action fingerprint (W-2). Raised instead of silently coercing it
+    with ``str()`` — the coercion is what let an object stringifying to "100"
+    collide with the string "100", and let a mutable object be swapped after the
+    hash was taken."""
+
+
+# The only value types the fingerprint will commit to. Anything else (custom
+# objects, callables, sets, bytes, …) is REJECTED rather than str()-coerced.
+_JSON_PRIMITIVES = (str, int, float, bool, type(None))
+
+
+def _strict_encode(value: Any, _path: str = "payload") -> Any:
+    """Return ``value`` unchanged if it is built only from JSON primitives, else
+    raise :class:`UnfingerprintablePayload`.
+
+    This closes W-2: the fingerprint used ``json.dumps(..., default=str)``, which
+    (a) coerced any non-serializable object via ``str()`` — so an object whose
+    ``__str__`` returns "100" fingerprinted identically to the string "100"
+    (type-confusion collision), and (b) committed to a STRING SNAPSHOT of a
+    mutable object, letting the object be mutated after authorization while the
+    binding still matched (TOCTOU / mutate-after-auth). Rejecting non-primitives
+    up front makes both unrepresentable: the payload must be plain JSON data whose
+    value at hash-time IS its value at execute-time."""
+    if isinstance(value, bool) or value is None or isinstance(value, (int, float, str)):
+        return value
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise UnfingerprintablePayload(
+                    f"{_path}: non-string dict key {k!r} of type {type(k).__name__}"
+                )
+            out[k] = _strict_encode(v, f"{_path}.{k}")
+        return out
+    if isinstance(value, (list, tuple)):
+        return [_strict_encode(v, f"{_path}[{i}]") for i, v in enumerate(value)]
+    raise UnfingerprintablePayload(
+        f"{_path}: value of type {type(value).__name__} is not a JSON primitive; "
+        f"payloads bound by a decision must be plain JSON data "
+        f"(str/int/float/bool/None/list/dict) — refusing to str()-coerce it"
+    )
+
+
 def action_fingerprint(action: dict[str, Any]) -> str:
     """sha256 committing a decision/token to the security-relevant action content
-    (actor, capability, purpose, labels, payload) — so a signed authorization
-    cannot be re-attached to a different action. Closes the confused-deputy gap."""
+    (actor, capability, purpose, labels, payload, and the nonce/action_ref) — so a
+    signed authorization cannot be re-attached to a different action. Closes the
+    confused-deputy gap.
+
+    W-1: ``action_ref`` (falling back to ``nonce``) is folded into the binding so
+    two actions that differ ONLY by nonce no longer share a fingerprint.
+
+    W-2: the payload is passed through a strict encoder that REJECTS any value
+    that is not a JSON primitive (raising :class:`UnfingerprintablePayload`),
+    instead of ``str()``-coercing it — closing the object/string collision and the
+    mutate-after-auth window."""
     normalized = {
         "actor": action.get("actor", ""),
         "capability": action.get("capability") or f"tool:{action.get('tool', '')}",
         "action_purpose": action.get("action_purpose", ""),
         "data_labels": sorted(action.get("data_labels") or []),
-        "payload": action.get("payload") or {},
+        # W-1: bind the caller-supplied action reference. The kernel derives
+        # `action_ref` the same way (`nonce` else `action_ref`), and the executor
+        # checks action.nonce/action_ref == decision.action_ref, so a decision
+        # minted for one reference cannot authorize a different action object.
+        "action_ref": action.get("nonce") or action.get("action_ref") or "",
+        "payload": _strict_encode(action.get("payload") or {}),
     }
-    return hashlib.sha256(_canonical(normalized)).hexdigest()
+    # default=str is no longer needed: _strict_encode guarantees JSON primitives.
+    canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def verify(obj: dict[str, Any], signature_hex: str, public_key_hex: str) -> bool:

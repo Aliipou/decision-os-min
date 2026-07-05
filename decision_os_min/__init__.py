@@ -23,8 +23,8 @@ from typing import Any
 from .advisors import simple_threat_advisor
 from .audit import HashLog
 from .contracts import Action, AuditEntry, CapabilityToken, Decision, Verdict
-from .execute import ExecutionRefused, Executor
-from .kernel import Kernel, action_fingerprint, verify
+from .execute import AuditSink, ExecutionRefused, Executor
+from .kernel import Kernel, UnfingerprintablePayload, action_fingerprint, verify
 from .paradigm import LegitimacyAuthorityPipeline
 from .plugins import (
     ContextPlugin,
@@ -36,6 +36,13 @@ from .plugins import (
     apply_context,
     risk_advisor,
 )
+from .spentstore import (
+    FileSpentStore,
+    InMemorySpentStore,
+    SpentStore,
+    SpentStoreUnavailable,
+    SqliteSpentStore,
+)
 
 __all__ = [
     "DecisionOS",
@@ -43,7 +50,14 @@ __all__ = [
     "Kernel",
     "Executor",
     "ExecutionRefused",
+    "AuditSink",
     "HashLog",
+    "SpentStore",
+    "FileSpentStore",
+    "SqliteSpentStore",
+    "InMemorySpentStore",
+    "SpentStoreUnavailable",
+    "UnfingerprintablePayload",
     "action_fingerprint",
     "verify",
     "simple_threat_advisor",
@@ -88,8 +102,10 @@ class DecisionOS:
 
     def __init__(self, policy: dict[str, Any], *, audit_path: str) -> None:
         self.kernel = Kernel(policy)
-        self.executor = Executor(self.kernel.public_key_hex())
         self.log = HashLog(audit_path)
+        # The executor OWNS the audit write now (HB-3): it records exactly one
+        # entry per execute() — executed or refused — so no effect runs unlogged.
+        self.executor = Executor(self.kernel.public_key_hex(), self.log)
 
     def handle(
         self,
@@ -109,15 +125,13 @@ class DecisionOS:
         result = self.kernel.decide(action, threat_class, advisor=advisor)
         decision = result["decision"]
 
-        # Gate 3 — audit/commit: record the authorized decision durably (BEFORE the
-        # side effect, so a crash cannot erase the authorization record). The
-        # AUTHORITY-BOUND tool is logged (from the capability), never a raw field.
-        cap = action.get("capability") or f"tool:{action.get('tool', '')}"
-        self.log.record(action.get("actor", ""), cap.split("tool:")[-1],
-                        decision["verdict"], decision["reason"])
-
+        # Gate 3 — audit/commit is now enforced INSIDE the executor (HB-3): a
+        # single audit entry is written per execute() with the executed/refused
+        # outcome and a payload digest (W-3), so the record reflects what actually
+        # happened, not just the pre-execution verdict. The executor writes even on
+        # refusal, so both branches below are already audited.
         try:
-            output = self.executor.execute(action, result, tools)   # Gate 2 + effect
+            output = self.executor.execute(action, result, tools)   # Gate 2 + audit + effect
             return Outcome(decision["verdict"], True, output)
         except ExecutionRefused as e:
             return Outcome(decision["verdict"], False, refused_reason=str(e))
