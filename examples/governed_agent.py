@@ -16,6 +16,7 @@ from pathlib import Path
 
 from decision_os_min import GovernanceRefused, Governor, set_actor
 
+
 # ---- your existing tools (unchanged) --------------------------------------
 def send_email(to, body):
     return f"email -> {to}: {body}"

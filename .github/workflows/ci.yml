@@ -8,19 +8,25 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "${{ matrix.python-version }}"
+      - run: python -m pip install --upgrade pip
       - name: Install (core + service + dev)
         run: pip install -e ".[service,dev]"
-      - name: Lint
-        run: ruff check decision_os_min/
-      - name: Types
-        run: mypy decision_os_min/
-      - name: Tests
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Types (mypy)
+        run: mypy decision_os_min
+      - name: Tests (pytest)
         run: pytest -q
+        env:
+          AUTHGATE_BACKEND: python
 
   docker:
     runs-on: ubuntu-latest

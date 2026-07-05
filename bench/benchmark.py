@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import gc
 import platform
-import statistics
 import sys
 import tempfile
 import time

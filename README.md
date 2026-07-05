@@ -1,8 +1,8 @@
 # decision-os-min
 
-**A minimal reference implementation of the Decision OS — designed to preserve the
-core security invariants in a single package while dramatically reducing
-architectural complexity.**
+**A minimal reference implementation of the Decision OS: it preserves the core
+security invariants in a single package, collapsing the multi-repo architecture
+into one `handle()` call.**
 
 > **What "OS" means here:** an *execution-governance / decision-enforcement layer*
 > — the authority + audit plane for an agent's tool calls — **not** an operating
@@ -193,3 +193,24 @@ Decision OS
 logic changes, it is stabilized **here first**, then the enterprise track extends
 the *same* behavior with more capability (distribution, integration, research).
 The two versions must never fork their decision semantics.
+
+## Trusted core (Rust)
+
+Both distributions of the Decision OS — this minimal one and the full
+[`decision-os-integration`](https://github.com/Aliipou/decision-os-integration)
+harness — **link the same two rustified trusted-core components** rather than
+carrying divergent copies. Minimal links them for compact embedding; the integration
+harness links them for the full multi-repo deployment.
+
+- **[authgate-kernel](https://github.com/Aliipou/authgate-kernel)** — the Rust
+  *authority* TCB (the decision + capability core), with machine-checked models
+  (Lean 4 / TLA+ / Kani).
+- **[freedom-decision-kernel/rust](https://github.com/Aliipou/freedom-decision-kernel)**
+  — the Rust *legitimacy-kernel* parity port.
+
+Honest scope: the Rust components are the **trusted computing base** (authority +
+the legitimacy-kernel primitive). The legitimacy **policy** — the injected rule
+that fills the DENY-only gate — stays Python: it is policy, not TCB, and is
+contained by the Rust authority backstop. This is **not** a full Rust rewrite of
+the system, and the Python reference implementation in this repo remains the
+primary, self-contained artifact.

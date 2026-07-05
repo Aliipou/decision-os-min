@@ -12,6 +12,7 @@ from pathlib import Path
 
 from decision_os_min import DecisionOS
 
+
 # ---------------------------------------------------------------- the tools
 def lookup_order(p):
     return f"order {p.get('order_id', '?')}: shipped"
@@ -69,7 +70,7 @@ def main() -> int:
     print("  DECISION OS  —  an AI support agent under governance")
     print("=" * 70)
     dos = DecisionOS(POLICY, audit_path=str(audit))
-    print(f"  policy: agent:support-ai may  lookup_order, send_email")
+    print("  policy: agent:support-ai may  lookup_order, send_email")
     print(f"  kernel key: {dos.kernel.public_key_hex()[:16]}...\n")
 
     for title, action, threat in AGENT_PLAN:

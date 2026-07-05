@@ -32,7 +32,15 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
+# E501 (line length) is relaxed for tests, runnable examples, and benchmarks:
+# these contain wide literal data rows where wrapping hurts readability.
 "tests/**" = ["E501"]
+"examples/**" = ["E501"]
+"bench/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -8,7 +8,8 @@ TOOLS = {"send_email": lambda p: "sent", "wire_money": lambda p: "wired"}
 def _act(**kw):
     b = {"tool": "send_email", "capability": "tool:send_email", "actor": "agent:bot",
          "action_purpose": "x", "data_labels": [], "payload": {}, "nonce": "n"}
-    b.update(kw); return b
+    b.update(kw)
+    return b
 
 def test_legitimacy_deny_blocks_even_when_authorized(tmp_path):
     # authorized action, but legitimacy says no -> DENY, authority never consulted.
