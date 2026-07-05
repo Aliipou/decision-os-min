@@ -9,19 +9,22 @@ into one `handle()` call.**
 > system in the classic sense. It's a research-*oriented* architecture: its
 > advantages over existing tools are not yet proven by independent evaluation.
 
-> **Value-neutral by design.** This is a *policy runtime*, not a worldview. Any
-> normative framework — GDPR, HIPAA, the EU AI Act, ISO 42001, NIST AI RMF, or a
-> research theory — sits *on top* of it as an enforceable, auditable **policy**.
-> The kernel decides nothing on its own; it enforces the policy you give it. The
-> runtime is the *bottom* layer, not the top.
-
-> **Legitimacy ⊥ Authority.** `LegitimacyAuthorityPipeline` (shipped here) puts a
-> DENY-only *legitimacy* gate — "should this happen at all?" (the FDK role) — in
-> front of the kernel's *authority* — "does this actor hold the capability?".
+> **Legitimacy ⊥ Authority — the system is BOTH layers, and both are the theory
+> made executable.** This is not "just a legitimacy filter" and not "just neutral
+> plumbing." Two independent layers, both derived from the theory:
+> - **FDK — legitimacy** (ownership / consent / verifier): *should this happen at
+>   all?* A **DENY-only** gate. Runs **first**.
+> - **AuthGate — authority** (delegated machine property rights: tool-permission +
+>   runtime enforcement): *does this actor hold the capability?* Grants only
+>   **within** legitimacy. Runs **after** FDK.
+>
+> `LegitimacyAuthorityPipeline` (shipped here) wires them in the locked order.
 > **Invariant, enforced by structure:** legitimacy may only DENY (it returns just
 > `(ok, reason)`, never a grant); authority never overrides a legitimacy denial.
-> The legitimacy *rule* is injected policy — never baked into the kernel. A
-> proposed architecture, not a proven paradigm.
+> The *normative rule* filling each slot is injected policy — never baked into the
+> kernel — so operational frameworks (GDPR, HIPAA, the EU AI Act, ISO 42001, NIST
+> AI RMF) also express as enforceable, auditable policy on top. A proposed
+> architecture, not a proven paradigm.
 
 ```python
 from decision_os_min import DecisionOS
@@ -45,7 +48,13 @@ model — in ~400 lines, stdlib + `cryptography` only.
     DecisionOS.handle()
           │
           ▼
-        Kernel  ── Gate 1: identity + capability + purpose
+      Identity  ── admission: is this a known principal?
+          │
+          ▼
+   FDK legitimacy ── DENY-only: should this happen at all? (may only refuse)
+          │
+          ▼
+   AuthGate authority ── Gate 1: capability + purpose, grant WITHIN legitimacy
           │
           ├── Decision (signed)
           ├── Capability Token (one-time, action-bound)
@@ -57,6 +66,8 @@ model — in ~400 lines, stdlib + `cryptography` only.
         Execute ── Gate 2: signature + action binding + token
 ```
 
+**Locked pipeline order:** identity admission → FDK legitimacy (DENY-only) →
+AuthGate authority (grant within legitimacy) → PEP execute + audit.
 **One action, three gates, one central policy.** The full multi-repo system runs
 the same gates across separate services; here they are collapsed into one call —
 fewer layers, same gate-passes.
