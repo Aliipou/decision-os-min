@@ -50,10 +50,20 @@ class GovernanceRefused(RuntimeError):
 
 
 class Governor:
-    def __init__(self, policy: dict[str, Any], *, audit_path: str) -> None:
+    def __init__(
+        self,
+        policy: dict[str, Any],
+        *,
+        audit_path: str,
+        evaluators: list[Callable[[dict[str, Any]], dict[str, Any] | str]] | None = None,
+    ) -> None:
         from decision_os_min import DecisionOS  # lazy: DecisionOS lives in __init__
 
         self._dos = DecisionOS(policy, audit_path=audit_path)
+        # Co-equal governance evaluators (e.g. an FDK legitimacy evaluator). Their
+        # DENY is authoritative and cannot be overridden by authority — see
+        # kernel.decide / COMPOSITION.md. Default: none (authority only).
+        self._evaluators = evaluators
 
     @property
     def public_key(self) -> str:
@@ -82,7 +92,9 @@ class Governor:
                     "payload": payload,
                     "nonce": uuid.uuid4().hex[:12],
                 }
-                outcome = self._dos.handle(action, {name: lambda p: fn(**p)})
+                outcome = self._dos.handle(
+                    action, {name: lambda p: fn(**p)}, evaluators=self._evaluators
+                )
                 if not outcome.executed:
                     raise GovernanceRefused(outcome.verdict, outcome.refused_reason)
                 return outcome.output

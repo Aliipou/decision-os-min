@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .kernel import CONTAIN, DEFER, DENY, LIMIT, action_fingerprint, verify
+from .compose import CONTAIN, DEFER, DENY, LIMIT
+from .kernel import action_fingerprint, verify
 from .spentstore import FileSpentStore, SpentStore, SpentStoreUnavailable
 
 

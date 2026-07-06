@@ -22,7 +22,9 @@ from typing import Any
 
 from .advisors import simple_threat_advisor
 from .audit import HashLog
+from .compose import Evaluator, compose, meet
 from .contracts import Action, AuditEntry, CapabilityToken, Decision, Verdict
+from .evaluators import LegitimacyPolicy, legitimacy
 from .execute import AuditSink, ExecutionRefused, Executor
 from .kernel import Kernel, UnfingerprintablePayload, action_fingerprint, verify
 from .paradigm import LegitimacyAuthorityPipeline
@@ -80,6 +82,12 @@ __all__ = [
     "HeuristicRiskPlugin",
     "PIIContextPlugin",
     "LegitimacyAuthorityPipeline",
+    # composition primitives (co-equal evaluators -> one verdict, deny-dominant)
+    "Evaluator",
+    "compose",
+    "meet",
+    "legitimacy",
+    "LegitimacyPolicy",
 ]
 
 
@@ -114,6 +122,7 @@ class DecisionOS:
         threat_class: str | None = None,
         *,
         advisor: Callable[[dict[str, Any]], str | None] | None = None,
+        evaluators: list[Callable[[dict[str, Any]], dict[str, Any] | str]] | None = None,
     ) -> Outcome:
         # One action passes THREE gates against ONE central policy — the gate
         # philosophy of the full system, collapsed into one call (not one gate
@@ -122,7 +131,9 @@ class DecisionOS:
         # Gate 1 — pre-decision (inside the kernel): identity/capability + purpose.
         # Gate 2 — pre-execution (inside the executor): signature + action binding
         #          + one-time token. Both are enforced by the calls below.
-        result = self.kernel.decide(action, threat_class, advisor=advisor)
+        result = self.kernel.decide(
+            action, threat_class, advisor=advisor, evaluators=evaluators
+        )
         decision = result["decision"]
 
         # Gate 3 — audit/commit is now enforced INSIDE the executor (HB-3): a

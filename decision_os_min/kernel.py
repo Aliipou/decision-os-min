@@ -20,16 +20,25 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
+# Verdicts + the meet/compose primitives live in compose.py (the base module with
+# no internal deps). Imported here and re-exported, so existing callers that do
+# `from .kernel import DENY, PERMITTING, ...` keep working unchanged.
+from .compose import (
+    ALLOW,
+    CONTAIN,
+    DENY,
+    LIMIT,
+    PERMITTING,
+    Evaluator,
+    as_decision,
+    more_restrictive,
+)
+
 # An advisor is an OPTIONAL plugin: given an action, it may suggest a threat
 # class (e.g. "malicious"). It is advice, never authority — the kernel decides.
 Advisor = Callable[[dict[str, Any]], "str | None"]
 
 KERNEL_IDENTITY = "decision-os-min-kernel"
-
-# Verdicts. ALLOW=as-is, DENY=refuse, LIMIT=minimized payload, CONTAIN=sandbox
-# (advisory-driven), DEFER=escalate. PERMITTING mint a token.
-ALLOW, DENY, LIMIT, CONTAIN, DEFER = "ALLOW", "DENY", "LIMIT", "CONTAIN", "DEFER"
-PERMITTING = {ALLOW, LIMIT, CONTAIN}
 
 _CONTAINMENT = {"sandbox": True, "network": "none", "allowed_tools": [], "time_limit_seconds": 5}
 
@@ -191,6 +200,7 @@ class Kernel:
         threat_class: str | None = None,
         *,
         advisor: Advisor | None = None,
+        evaluators: list[Evaluator] | None = None,
     ) -> dict[str, Any]:
         """Return {decision, signature, token}. The decision and token both bind
         the action fingerprint; token is None for non-permitting verdicts.
@@ -198,10 +208,28 @@ class Kernel:
         `advisor` is an OPTIONAL plugin (e.g. an FDK threat classifier). Without
         it the kernel works fully; with it the kernel CONSULTS its suggestion but
         still makes the call. `advisor` takes precedence over an explicit
-        `threat_class` when both are given."""
+        `threat_class` when both are given.
+
+        `evaluators` are OPTIONAL **co-equal** governance evaluators (e.g. an FDK
+        legitimacy evaluator, and later safety/privacy/cost/...). Unlike an
+        advisor — which can only *suggest* a threat class the kernel may map to
+        CONTAIN — an evaluator returns a full verdict, and its DENY is
+        AUTHORITATIVE: we compose this kernel's own authority verdict with every
+        evaluator's verdict by the lattice meet (most-restrictive-wins, DENY
+        absorbing) BEFORE minting any token. So authority ∧ legitimacy ∧ … must
+        all permit, no side can override another's DENY, and (Invariant: token
+        mint only after the composed verdict) no capability is minted for an
+        action a later evaluator vetoes. Composition is commutative/associative,
+        so evaluator order carries no meaning — only latency."""
         if advisor is not None:
             threat_class = advisor(action)
+        # AUTHORITY: this kernel's own capability/purpose ruling.
         decision = self._evaluate(action, threat_class)
+        # CO-EQUAL EVALUATORS: fold each verdict in by meet, deny-dominant. This
+        # happens before issued_by/binding/mint below, so the token (minted only
+        # on a PERMITTING composed verdict) can never precede the composition.
+        for evaluate in evaluators or ():
+            decision = more_restrictive(decision, as_decision(evaluate(action), action))
         decision["issued_by"] = KERNEL_IDENTITY
         decision["action_binding"] = action_fingerprint(action)
         token = None
