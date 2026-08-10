@@ -39,6 +39,45 @@ effect ONLY against that signed, bound decision and unspent token; every decisio
 is appended to **one** tamper-evident hash-chained log. That is the whole security
 model — in ~400 lines, stdlib + `cryptography` only.
 
+## Status — 2026-08-10
+
+Three claims in this README were tested this week. One held, one was corrected, one
+was falsified and fixed twice. All three results are in the repository.
+
+**1. The pipeline order is NOT locked, and order carries no meaning.** Composition is
+the **meet of a bounded verdict lattice**, deny-dominant: `ALLOW ≺ LIMIT ≺ CONTAIN ≺
+DEFER ≺ DENY`, with `DENY` absorbing. `meet` is commutative and associative, so
+evaluator order is a *performance* choice and nothing else. `LegitimacyAuthorityPipeline`
+still ships and still works, but `tests/test_evaluators.py` proves it is equivalent to
+`handle(..., evaluators=[legitimacy(policy)])` on the whole truth table — the sequential
+stage is redundant. The only genuine ordering constraint is engineering, not primacy:
+the one-time token mint plus audit-before-effect must be the single terminal commit.
+
+**2. Stacking two engines is not merely untidy — it is incorrect.** Engine A rules and
+**mints a one-time capability** before engine B is consulted, so B's refusal arrives
+after the mint and a live token exists for a refused action. Composed, the veto lands
+before the mint. See `tests/test_authority_convergence.py`.
+
+**3. "An untrusted evaluator can at worst deny" was FALSE as implemented — twice.**
+A red team produced runnable exploits: field injection through the composer, a TOCTOU
+via the live action dict, and an evaluator authoring the executed payload. After the
+fix, a second red team broke the fix: a `str` subclass whose *value* was `"DENY"` but
+whose `__hash__`/`__eq__` impersonated `"ALLOW"` governed the fold as a veto and then
+passed the mint gate — a semantic veto that executed, with a signature that verified.
+Both are closed; `tests/test_redteam_composition.py` and `tests/test_redteam_round2.py`
+keep the attacks as permanent regressions. The lesson is recorded because it will
+recur: **"fail-closed for the variant I happened to write" is not fail-closed.**
+
+Five gaps remain open and are named as `test_break*` rather than hidden: no evaluator
+timeout, `BaseException` is deliberately not caught, and the sequential pipeline still
+diverges from the composer when a policy raises.
+
+**Conformance:** 8 pass / 0 fail / 2 not-applicable against the Authority Enforcement
+Profile (`contracts-spec/conformance/`). The two N/A are attenuation and temporal
+attenuation — there is no delegation graph here. That is a gap, not a pass.
+
+167 tests, ruff and mypy clean.
+
 ## How it flows
 
 ```text
