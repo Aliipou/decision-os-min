@@ -73,6 +73,7 @@ from decision_os_min.compose import (
     DENY,
     LIMIT,
     PERMITTING,
+    VERDICTS,
     compose,
     meet,
 )
@@ -417,10 +418,11 @@ def test_fixed3_plugin_contain_can_no_longer_deliver_the_redacted_secret(tmp_pat
     assert out.refused_reason == "contained: 'send_email' not in allowlist []"
     # No tool ran at all, so the SSN authority redacted was never delivered.
     assert sink == []
-    # The refusal is caused by the plugin's allowlist being STRIPPED, not honoured:
-    # a CONTAIN with no containment falls back to an empty allowlist. This is the
-    # exact point where obligation loss stopped being fail-open.
-    assert "not in allowlist []" in (out.refused_reason or "")
+    # Read that refusal reason carefully: the empty allowlist is the plugin's
+    # allowlist STRIPPED, not honoured. A CONTAIN carrying no containment falls back
+    # to allowing nothing. That default is the exact point where obligation loss
+    # stopped being fail-open — see
+    # test_finding_R1_leaves_a_signed_permitting_decision_with_no_obligation.
 
 
 def test_fixed3b_plugin_cannot_choose_its_own_containment_allowlist(tmp_path):
@@ -866,6 +868,95 @@ def test_fixed4d_mutation_from_inside_a_blessed_legitimacy_policy_is_inert(tmp_p
     )
     assert out.executed is True and out.output == "sent"  # the granted tool, not wire_money
     assert sink == [("send_email", {"to": "x@ok.test"})]
+
+
+def test_finding_R2_normalize_is_bypassable_by_a_lying_str_subclass(tmp_path):
+    """NEW FINDING, found while inverting these tests. Scope limit on R2, pinned so
+    the strengthened claim is not read as more than it is.
+
+    `normalize` decides lattice membership with `verdict in _RANK` — a hash lookup.
+    A `str` SUBCLASS whose `__eq__`/`__hash__` collide with a real lattice member
+    passes that test and is returned VERBATIM, so the two properties R2 buys are
+    both false for it: the composed verdict escapes `VERDICTS`, and `meet` is once
+    again non-commutative at the string level.
+
+    It is NOT an escalation, which is why it is a finding and not a break: the liar
+    below ranks as DENY, so it is outside PERMITTING, no token is minted and nothing
+    executes. The reachable damage is the same misreading R2 set out to prevent — a
+    downstream consumer testing `verdict == DENY` sees a refusal it does not
+    recognise. The real fix is a type check (`type(verdict) is str`) or an explicit
+    membership test against `VERDICTS`, not a hash lookup."""
+
+    class LiarDeny(str):
+        def __eq__(self, other):
+            return other == DENY
+
+        def __hash__(self):
+            return hash(DENY)
+
+    liar = LiarDeny("GOTCHA-not-a-verdict")
+
+    # R2's guarantee does not hold for it:
+    assert str(compose([liar])) == "GOTCHA-not-a-verdict"
+    assert str(compose([liar])) not in VERDICTS
+    assert str(meet(liar, DENY)) != str(meet(DENY, liar))  # commutativity fails again
+
+    # ...but it is still fail-closed end to end: no token, no execution.
+    sink = []
+    out = _dos(tmp_path).handle(
+        _action(), _spy_tools(sink), evaluators=[lambda a: {"verdict": liar, "reason": "liar"}]
+    )
+    assert not out.executed
+    assert out.verdict not in PERMITTING
+    assert sink == []
+
+
+def test_finding_R1_leaves_a_signed_permitting_decision_with_no_obligation(tmp_path):
+    """NEW FINDING, found while inverting these tests. This is where R1 moved the
+    hazard rather than removing it, and it is the one thing about the fix that could
+    bite a THIRD-PARTY implementation of the contract.
+
+    LIMIT and CONTAIN are PERMITTING verdicts, so when an evaluator's LIMIT/CONTAIN
+    governs the fold the kernel still mints a real capability token and SIGNS the
+    decision. R1 has just stripped the obligation that verdict exists to carry. The
+    result is a kernel-signed, `verify()`-passing, token-bearing decision that says
+    "run this, but minimized / but sandboxed" and specifies NEITHER the minimization
+    NOR the sandbox.
+
+    decision-os-min's own PEP is safe: it REFUSES a LIMIT with no
+    `transformed_payload`, and an absent `containment` yields an empty allowlist so a
+    CONTAIN refuses too. Both are asserted below. But that safety lives entirely in
+    the PEP's defaults, not in the decision. Any other executor that reads an absent
+    obligation as "no restriction to apply" turns LIMIT into ALLOW and CONTAIN into
+    ALLOW — which is precisely BREAK #2/#3 again, one implementation away.
+
+    Pinned so the coupling is explicit: the token-mint rule and the PEP's
+    obligation-absent defaults are now load-bearing for each other."""
+    from decision_os_min import verify
+
+    kernel = Kernel(POLICY)
+    for verdict in (LIMIT, CONTAIN):
+        result = kernel.decide(
+            _action(), evaluators=[lambda a, v=verdict: {"verdict": v, "reason": "veto"}]
+        )
+        decision = result["decision"]
+        # A permitting, signed decision with a live token...
+        assert decision["verdict"] == verdict
+        assert result["token"] is not None
+        assert verify(decision, result["signature"], kernel.public_key_hex())
+        # ...and no obligation of any kind attached to it.
+        assert "transformed_payload" not in decision
+        assert "containment" not in decision
+
+    # The PEP's defaults are what make that safe. Both refuse.
+    for verdict in (LIMIT, CONTAIN):
+        sink = []
+        out = _dos(tmp_path, f"obl-{verdict}.jsonl").handle(
+            _action(nonce=f"n-{verdict}"),
+            _spy_tools(sink),
+            evaluators=[lambda a, v=verdict: {"verdict": v, "reason": "veto"}],
+        )
+        assert not out.executed and sink == []
 
 
 def test_defence_empty_evaluator_list_is_still_gated_by_authority(tmp_path):
