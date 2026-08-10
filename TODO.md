@@ -28,22 +28,35 @@ unpushed, `ownership.py` + a "not ready" README).
   its axioms defined precisely, and its own threat model + invariants written.
   Encoding it now = rework in months. Each layer is a paper-sized project.
 
-## FDK (freedom-decision-kernel) — the "other branch" ❌ CLOSED / DONE (negative result)
-Checked branch `paradigm/stages-2-9`. Its own `STATUS.md` (2026-06-20, a deliberate
-closure) records:
-- **Theory of Freedom — CLOSED, negative result published.** It "did not survive its
-  own attacks; reduces to Nozick / Pettit / Sen," and the surviving "reversibility"
-  idea is "a reparameterization of the existing lock-in literature (≈ switching
-  cost)." **Explicitly: do not reopen.**
-- **Research layer — FINISHED** (frozen kernel, four-checker verification, 100%
-  coverage) — kept as an engineering + honest-research showcase.
-- **Lock-in Analytics tool — BUILT, frozen pending real data.**
-- Open TODO items remain (real-world **ownership ontology** — "the hardest part"; the
-  **attested→detected gap** for `coerced`/`deceived`), but flagged blocked / do-not-reopen.
+## FDK (freedom-decision-kernel) — the "other branch" ⚠ REOPENED / UNDER RE-EVALUATION
 
-**So: the FDK theory work is done — as a rigorously-closed negative result.** That is
-itself the strongest evidence for the current strategy: the value is the
-**theory-agnostic runtime**, not any one normative theory.
+**Status corrected 2026-08-10.** This section used to read "CLOSED — negative result,
+do not reopen," quoting `STATUS.md` (2026-06-20). That framing was OVERSTATED and was
+retracted in the 2026-07-05 correction sweep (READMEs + RFC-100 were fixed then; this
+file was missed). The accurate status:
+
+- **Independence from Nozick / Pettit / Sen is NOT demonstrated — and NOT refuted.**
+  The honest claim was always "independence not established under the then-available
+  evidence," which is undetermined, not false. New evidence was subsequently entered
+  (the green-team defense, `paper/SYMPOSIUM.md`, and the killer-test / predictive-test
+  program), and a symposium found the earlier red-teams had OVERCLOSED in two places,
+  both empirical. So: **OPEN / under active re-evaluation.** Assert neither "closed"
+  nor "proven."
+- **Research layer — FINISHED as engineering** (frozen kernel, four-checker
+  verification, 100% coverage); kept as an engineering + honest-research showcase.
+  "Finished building" is not "settled question."
+- **Lock-in Analytics tool — BUILT, frozen pending real data.** The reversibility
+  construct is **undecided, not killed**: the r² = 0.97 result was traced to a seed
+  artifact, and a cheap outcome-free discriminant test was identified but never run.
+- Open items remain: the real-world **ownership ontology** ("the hardest part") and the
+  **attested→detected gap** for `coerced` / `deceived` — the gate trusts flags it
+  cannot itself verify.
+
+**What this does NOT change:** the strategy here is unaffected either way. This runtime
+is deliberately **theory-agnostic** — the legitimacy rule is injected policy, never
+baked into the kernel — so it neither depends on FDK being right nor benefits from its
+being wrong. That independence is the point of the seam, and it is why the runtime was
+frozen before any normative layer was built.
 
 ## Standing principles (apply to every phase)
 - Never mix policy with mechanism (the most important rule).

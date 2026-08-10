@@ -10,3 +10,5 @@ dist/
 # runtime audit logs (the service default writes here)
 audit.jsonl
 *.jsonl
+.coverage
+.hypothesis/

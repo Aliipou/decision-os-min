@@ -37,6 +37,11 @@ PERMITTING = {ALLOW, LIMIT, CONTAIN}
 # COMPOSITION.md §"Obligations".
 _RANK = {ALLOW: 0, LIMIT: 1, CONTAIN: 2, DEFER: 3, DENY: 4}
 
+# The lattice vocabulary. An adapter wrapping a foreign engine uses this to reject
+# a verdict the lattice does not know, instead of letting an unrecognized string
+# ride through as if it were permission.
+VERDICTS = frozenset(_RANK)
+
 # An Evaluator maps an action to a verdict. It may return a bare verdict string,
 # or a decision dict ({"verdict", "reason", ...}) so its reason/obligations are
 # carried through when it is the governing (most-restrictive) evaluator.
