@@ -597,7 +597,19 @@ def test_fixed5_external_limit_without_a_payload_is_refused(tmp_path):
 # respect: `reason` is now the only channel an evaluator has left, and it is
 # exactly the field the refusal audit discards.
 # =============================================================================
-def test_break6_composed_deny_is_audited_without_reason_or_tool(tmp_path):
+def test_fixed6_a_composed_deny_is_audited_with_its_reason_and_tool(tmp_path):
+    """CLOSED (conformance requirement AE-10, audit fidelity). The refusal path used
+    to log only the mechanical consequence — `refused: verdict DENY: no execution` —
+    discarding the vetoing evaluator's reason, and to log `tool=""` because the
+    kernel sets `capability` only on PERMITTING verdicts. So the audit could not
+    answer either "why was this refused" or "what was refused".
+
+    That was the wrong field to drop: `reason` is the ONE channel a veto-only
+    evaluator still owns, since R1 strips it of every other. An enforcement layer
+    whose log cannot name the vetoer is not accountable.
+
+    Found twice by independent routes — as this exploit, and as the single FAIL in
+    the first run of the Authority Enforcement conformance profile."""
     dos = _dos(tmp_path)
     out = dos.handle(
         _action(),
@@ -607,9 +619,12 @@ def test_break6_composed_deny_is_audited_without_reason_or_tool(tmp_path):
     assert not out.executed
     entry = dos.log.entries()[-1]
     assert entry["verdict"] == DENY
-    assert "consent revoked" not in entry["reason"], "exploit failed"
-    assert entry["reason"] == "refused: verdict DENY: no execution"
-    assert entry["tool"] == "", "exploit failed — the denied tool IS recorded"
+    # The vetoing evaluator's own reason survives into the record...
+    assert "consent revoked by data subject" in entry["reason"]
+    # ...alongside the mechanical consequence, not instead of it.
+    assert "refused" in entry["reason"]
+    # ...and the record names WHAT was refused.
+    assert entry["tool"] == "send_email"
 
 
 # =============================================================================

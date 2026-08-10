@@ -102,6 +102,13 @@ class Executor:
         # audit is written even when the decision is malformed.
         actor = action.get("actor", "") if isinstance(action, dict) else ""
         cap = decision.get("capability") if isinstance(decision, dict) else None
+        # AE-10: the kernel sets `capability` only on PERMITTING verdicts, so a
+        # refused action used to be logged with tool="" — the record could not say
+        # WHAT was refused. Fall back to the action's own tool/capability.
+        if not cap and isinstance(action, dict):
+            cap = action.get("capability") or (
+                f"tool:{action['tool']}" if action.get("tool") else None
+            )
         tool_for_audit = (cap or "").split("tool:")[-1] if cap else ""
         verdict_for_audit = decision.get("verdict", "") if isinstance(decision, dict) else ""
         reason_for_audit = decision.get("reason", "") if isinstance(decision, dict) else ""
@@ -111,11 +118,18 @@ class Executor:
         except ExecutionRefused as e:
             # HB-3 + W-3: one audit entry even on refusal — executed=False, with
             # the reason the effect did not run.
+            # AE-10 (audit fidelity): the RECORDED reason must be the reason the
+            # decision was made, not merely the mechanical consequence. This used
+            # to log only `refused: verdict DENY: no execution`, discarding the
+            # vetoing evaluator's reason entirely — so an audit could never answer
+            # "who vetoed this, and why". That is the one channel a veto-only
+            # evaluator still owns (COMPOSITION.md §11 strips it of every other),
+            # which made discarding it precisely the wrong field to drop.
             self._audit.record(
                 actor,
                 tool_for_audit,
                 verdict_for_audit,
-                f"refused: {e}",
+                f"{reason_for_audit} [refused: {e}]" if reason_for_audit else f"refused: {e}",
                 executed=False,
                 payload_digest=None,
             )
