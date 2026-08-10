@@ -7,6 +7,7 @@ stdlib + cryptography only.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import uuid
@@ -32,6 +33,7 @@ from .compose import (
     Evaluator,
     as_decision,
     more_restrictive,
+    sanitize,
 )
 
 # An advisor is an OPTIONAL plugin: given an action, it may suggest a threat
@@ -179,11 +181,17 @@ class Kernel:
                 continue
             if action.get("action_purpose") not in allowed:
                 return d(DENY, f"purpose mismatch: '{label}' != '{action.get('action_purpose')}'")
-        # containment — only for otherwise-permitted actions.
-        if threat_class in self._contain:
-            return d(CONTAIN, f"threat '{threat_class}' -> sandbox", containment=dict(_CONTAINMENT))
-        # data minimization -> LIMIT.
+        # Data minimization is an OBLIGATION, not a verdict. Compute it FIRST so it
+        # survives whatever verdict this action ends up with. It used to be computed
+        # AFTER the containment return, so a CONTAIN decision carried no
+        # transformed_payload and the redaction was silently dropped. That was latent
+        # rather than harmless: the default containment allowlist is empty, so CONTAIN
+        # executes nothing and nothing leaks — but an empty allowlist also makes
+        # CONTAIN operationally equivalent to DENY. The first operator to allowlist
+        # the tool (i.e. to make CONTAIN do its actual job) would have had the raw
+        # payload delivered into the sandbox. Verdict and obligation are orthogonal.
         payload = dict(action.get("payload") or {})
+        redacted: list[str] = []
         for rule in self._redactions:
             if rule.get("action_purpose") != action.get("action_purpose"):
                 continue
@@ -191,7 +199,23 @@ class Kernel:
             if hit:
                 for f in hit:
                     payload[f] = "[REDACTED]"
-                return d(LIMIT, f"redacted {sorted(hit)}", transformed_payload=payload)
+                redacted = sorted(hit)
+                break
+        obligations: dict[str, Any] = {"transformed_payload": payload} if redacted else {}
+
+        # containment — only for otherwise-permitted actions. It CARRIES the
+        # redaction: a sandbox constrains egress and lifetime, not what the tool is
+        # shown.
+        if threat_class in self._contain:
+            return d(
+                CONTAIN,
+                f"threat '{threat_class}' -> sandbox"
+                + (f"; redacted {redacted}" if redacted else ""),
+                containment=dict(_CONTAINMENT),
+                **obligations,
+            )
+        if redacted:
+            return d(LIMIT, f"redacted {redacted}", **obligations)
         return d(ALLOW, "all checks passed")
 
     def decide(
@@ -228,8 +252,26 @@ class Kernel:
         # CO-EQUAL EVALUATORS: fold each verdict in by meet, deny-dominant. This
         # happens before issued_by/binding/mint below, so the token (minted only
         # on a PERMITTING composed verdict) can never precede the composition.
+        #
+        # Three defences make the antitone/veto-only claim true rather than merely
+        # argued (see COMPOSITION.md §11 for the exploits that motivated each):
+        #   R3 — each evaluator sees a DEEP COPY, so it cannot mutate the action
+        #        that authority already ruled on (a plugin used to be able to
+        #        rewrite `capability` and have an ungranted tool execute under a
+        #        perfectly valid signature, because the fingerprint is taken from
+        #        the action AFTER this loop). A private copy each also stops one
+        #        evaluator from hiding an attribute from the next.
+        #   R1 — `sanitize` strips the evaluator's dict to {verdict, reason},
+        #        so it cannot inject token/capability/payload/containment fields.
+        #   I4 — a raising evaluator DENIES rather than propagating out of
+        #        `decide()`. BaseException (KeyboardInterrupt/SystemExit) is
+        #        deliberately NOT caught: that is process shutdown, not a verdict.
         for evaluate in evaluators or ():
-            decision = more_restrictive(decision, as_decision(evaluate(action), action))
+            try:
+                out = evaluate(copy.deepcopy(action))
+            except Exception as exc:
+                out = {"verdict": DENY, "reason": f"evaluator error (fail-closed): {exc}"}
+            decision = more_restrictive(decision, sanitize(as_decision(out, action)))
         decision["issued_by"] = KERNEL_IDENTITY
         decision["action_binding"] = action_fingerprint(action)
         token = None

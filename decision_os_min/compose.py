@@ -52,8 +52,25 @@ def _rank(verdict: str) -> int:
     return _RANK.get(verdict, _RANK[DENY])
 
 
+def normalize(verdict: str) -> str:
+    """Map anything outside the lattice onto ``DENY``.
+
+    R2 fix. Previously an unknown verdict *ranked* as DENY but was *returned
+    verbatim*, with two consequences: (a) ``meet`` was not commutative off-lattice
+    (``meet(DENY, "x") == "DENY"`` but ``meet("x", DENY) == "x"``), breaking the
+    order-independence the whole design rests on; and (b) a consumer testing
+    ``verdict == DENY`` — rather than ``verdict not in PERMITTING`` — read an
+    off-lattice string as "not a denial". Normalizing at the boundary means the
+    composed verdict is ALWAYS a member of ``VERDICTS``."""
+    return verdict if verdict in _RANK else DENY
+
+
 def meet(a: str, b: str) -> str:
-    """The lattice meet: the more restrictive of two verdicts (DENY absorbing)."""
+    """The lattice meet: the more restrictive of two verdicts (DENY absorbing).
+
+    Both operands are normalized first, so the result is always in the lattice and
+    the operation is commutative for arbitrary input, not just well-formed input."""
+    a, b = normalize(a), normalize(b)
     return a if _rank(a) >= _rank(b) else b
 
 
@@ -71,15 +88,56 @@ def as_decision(out: dict[str, Any] | str, action: dict[str, Any]) -> dict[str, 
     becomes a reasonless verdict; a dict missing ``verdict`` fails closed to DENY."""
     ref = action.get("nonce") or action.get("action_ref") or ""
     if isinstance(out, str):
-        return {"verdict": out, "reason": "", "action_ref": ref}
+        return {"verdict": normalize(out), "reason": "", "action_ref": ref}
+    if not isinstance(out, dict):
+        # An evaluator that returns None/42/[...] is malformed. Previously
+        # ``dict(out)`` raised out of ``decide()`` with an unstable exception type,
+        # so a caller could not reliably catch-and-deny (Invariant 4 was enforced
+        # only inside the evaluators.py wrappers, not at the kernel boundary).
+        return {
+            "verdict": DENY,
+            "reason": f"malformed evaluator output of type {type(out).__name__} (fail-closed)",
+            "action_ref": ref,
+        }
     d = dict(out)
-    d.setdefault("verdict", DENY)  # malformed evaluator output -> fail closed
+    verdict = d.get("verdict", DENY)  # malformed evaluator output -> fail closed
+    d["verdict"] = normalize(verdict) if isinstance(verdict, str) else DENY
     d.setdefault("reason", "")
-    d.setdefault("action_ref", ref)
+    # R1/F4: `action_ref` is the kernel's to state, never the evaluator's. It was
+    # `setdefault`, so a governing evaluator could write an identity field of a
+    # signed decision (and silently render a permitting decision unexecutable).
+    d["action_ref"] = ref
     return d
+
+
+# The ONLY keys an evaluator may contribute to the composed decision. Everything
+# else — token_id, capability, token_expires_at, action_binding, issued_by,
+# transformed_payload, containment — is the kernel's to state, and is stripped.
+EVALUATOR_CONTRIBUTABLE = frozenset({"verdict", "reason", "action_ref"})
+
+
+def sanitize(d: dict[str, Any]) -> dict[str, Any]:
+    """Strip an evaluator's decision down to what it is allowed to say.
+
+    R1 fix, and the core of the antitone argument. ``more_restrictive`` used to
+    adopt an evaluator's ENTIRE dict when it governed, so an untrusted, veto-only
+    plugin could inject fields that never enter the meet at all: a forged
+    ``token_id``/``capability`` (which the kernel then SIGNED), its own
+    ``containment`` allowlist, or a ``transformed_payload`` that became the
+    executed payload while ``action_binding`` still committed to the original.
+    The meet was antitone; the decision dict was not. It is now: an evaluator
+    contributes a verdict and a reason, and nothing else.
+
+    Consequence, stated plainly: an evaluator therefore CANNOT carry an obligation
+    (a redaction, a sandbox spec). That is deliberate — obligations do not yet
+    compose (COMPOSITION.md §7, and the design in OBLIGATIONS.md). Silently
+    honouring an unverified obligation is worse than refusing to carry one."""
+    return {k: v for k, v in d.items() if k in EVALUATOR_CONTRIBUTABLE}
 
 
 def more_restrictive(d1: dict[str, Any], d2: dict[str, Any]) -> dict[str, Any]:
     """Return whichever decision dict carries the more-restrictive verdict; ties
     keep ``d1`` (so the authority verdict and its obligations win a tie)."""
-    return d2 if _rank(d2.get("verdict", DENY)) > _rank(d1.get("verdict", DENY)) else d1
+    r1 = _rank(normalize(str(d1.get("verdict", DENY))))
+    r2 = _rank(normalize(str(d2.get("verdict", DENY))))
+    return d2 if r2 > r1 else d1

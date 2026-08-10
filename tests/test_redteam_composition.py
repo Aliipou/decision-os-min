@@ -1,8 +1,36 @@
-"""RED TEAM — runnable exploits against the composition layer.
+"""RED TEAM — runnable exploits against the composition layer, now as REGRESSIONS.
 
-Every test in this file is written to PASS when the exploit SUCCEEDS, i.e. a green
-run of this file is the proof of the break, not the absence of one. Each test names
-the invariant it falsifies:
+These exploits were real. Every one of them ran, and the file was originally
+written so that a GREEN run proved the break. That is no longer true: the blue-team
+fix landed (COMPOSITION.md §11, root causes R1/R2/R3), and a green run of this file
+now proves the exploits are REFUSED.
+
+**The attack code is frozen.** The evaluator functions, the forged dicts, the
+mutations, the payloads and the orderings are byte-for-byte what broke the system.
+Only the ASSERTIONS were inverted. Changing an attack would destroy the evidence,
+so any future weakening of the kernel resurrects the original exploit here.
+
+The three root causes, and the fix that closes each:
+
+    R1  field-stripping    — `compose.sanitize` + `EVALUATOR_CONTRIBUTABLE`: an
+                             evaluator may contribute ONLY {verdict, reason,
+                             action_ref}, and `action_ref` is then FORCED to the
+                             kernel's value. No forged token_id / capability /
+                             transformed_payload / containment survives the fold.
+    R2  normalize+whitelist— `compose.normalize` maps every off-lattice verdict to
+                             DENY inside `meet`, so the composed verdict is always
+                             a member of `VERDICTS`; and the PEP gates on the
+                             whitelist `verdict not in PERMITTING or not token_id`
+                             instead of a two-verdict blacklist.
+    R3  deep-copy          — each evaluator receives `copy.deepcopy(action)`, so it
+                             cannot mutate the action authority already ruled on,
+                             and cannot hide an attribute from the next evaluator.
+
+Plus two supporting changes: `as_decision` fails closed on non-dict/non-str returns
+and on unhashable verdicts, and a `LIMIT` with no `transformed_payload` is REFUSED
+by the PEP rather than degraded into a call with an empty payload.
+
+The invariants each test bears on:
 
     I1 deny-dominant     — no permitting verdict overrides any evaluator's DENY
     I2 veto-only/antitone— an evaluator can only restrict; it can never widen
@@ -11,7 +39,18 @@ the invariant it falsifies:
     I5 order-independent — evaluator order is semantically empty
     I6 convergence       — the bricks' equivalence claims hold on EVERY cell
 
-Nothing here is fixed; this file only demonstrates.
+STILL BROKEN — deliberately left asserting the vulnerable behaviour, keeping their
+`test_break*` names, because the fix did not touch them:
+
+    test_break6  — a composed DENY is audited without the vetoing reason and with
+                   tool="". The fix changed composition, not the audit path.
+    test_break7a — a policy raising BaseException (SystemExit/KeyboardInterrupt)
+                   propagates out of `decide()`. The kernel catches `Exception`
+                   only, on purpose: process shutdown is not a verdict.
+    test_break7c — there is no timeout in the evaluator seam; a slow evaluator
+                   simply blocks and is then honoured.
+    test_break8/8b — the sequential pipeline and the composed form still diverge
+                   when the policy raises, and on the audited refusal reason.
 """
 
 from __future__ import annotations
@@ -22,7 +61,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from decision_os_min import DecisionOS, Kernel, LegitimacyAuthorityPipeline
+from decision_os_min import (
+    DecisionOS,
+    GovernanceRefused,
+    Kernel,
+    LegitimacyAuthorityPipeline,
+)
 from decision_os_min.compose import (
     ALLOW,
     CONTAIN,
@@ -77,19 +121,24 @@ def _future(seconds=3600):
 
 
 # =============================================================================
-# BREAK #1 — an off-lattice "veto" verdict carrying forged token fields gets
-# SIGNED by the kernel and EXECUTES. Falsifies I1, I3, I4 and the ADR-0001 claim
-# that an untrusted evaluator "can at worst deny (a DoS)".
+# FIXED #1 (was BREAK #1) — an off-lattice "veto" verdict carrying forged token
+# fields USED to get SIGNED by the kernel and EXECUTE, falsifying I1, I3, I4 and
+# the ADR-0001 claim that an untrusted evaluator "can at worst deny (a DoS)".
 #
-# Mechanism:
-#   * compose._rank() maps an UNKNOWN verdict string to the rank of DENY, but
-#     `meet`/`more_restrictive` return the *unknown string itself* as the verdict.
-#   * kernel.decide mints nothing (the string is not in PERMITTING) — so far so
-#     good — but it SIGNS whatever extra keys the evaluator put in the dict.
-#   * execute._execute_inner gates on `verdict in (DENY, DEFER) or not token_id`.
-#     An unknown string is neither DENY nor DEFER, and the evaluator supplied the
-#     token_id/expiry/capability itself. The signature verifies (the kernel signed
-#     it) and the action binding matches, so the effect RUNS.
+# The original mechanism:
+#   * compose._rank() mapped an UNKNOWN verdict string to the rank of DENY, but
+#     `meet`/`more_restrictive` returned the *unknown string itself* as the verdict.
+#   * kernel.decide minted nothing (the string is not in PERMITTING) — so far so
+#     good — but it SIGNED whatever extra keys the evaluator put in the dict.
+#   * execute._execute_inner gated on `verdict in (DENY, DEFER) or not token_id`.
+#     An unknown string was neither DENY nor DEFER, and the evaluator supplied the
+#     token_id/expiry/capability itself. The signature verified (the kernel signed
+#     it) and the action binding matched, so the effect RAN.
+#
+# Closed by R2 (normalize + PERMITTING whitelist) and R1 (sanitize): the forged
+# verdict "deny" now normalizes to DENY inside the meet, the forged
+# token_id/capability/expiry never reach the signed decision, and the PEP refuses
+# anything not in PERMITTING regardless of what fields are present.
 # =============================================================================
 def _forging_plugin(verdict="deny", capability="tool:send_email"):
     """An untrusted veto-only plugin that returns a verdict which RANKS as DENY.
@@ -110,43 +159,67 @@ def _forging_plugin(verdict="deny", capability="tool:send_email"):
     return evaluate
 
 
-def test_break1_offlattice_veto_verdict_still_executes(tmp_path):
-    """I1 + I3 + I4: the composed verdict is non-permitting, the kernel minted NO
-    token (result["token"] is None) — and the tool ran anyway."""
+def test_fixed1_offlattice_veto_verdict_is_refused(tmp_path):
+    """ATTACK: a plugin returns the off-lattice verdict "deny" (a plausible foreign
+    dialect) together with a forged token_id/capability/expiry. It USED to succeed —
+    the kernel minted no token and still signed the plugin's forged fields, and the
+    PEP's blacklist gate (`verdict in (DENY, DEFER)`) did not recognise the
+    lowercase string as a refusal, so `send_email` ran.
+
+    CLOSED BY R2 + R1. R2's `normalize` folds "deny" to DENY inside `meet`, so the
+    composed verdict is a lattice member and the PEP's PERMITTING whitelist refuses
+    it. R1's `sanitize` strips the forged token fields before the kernel signs, so
+    even the signed decision carries no token to present."""
     sink = []
     dos = _dos(tmp_path)
     result = dos.kernel.decide(_action(), evaluators=[_forging_plugin()])
 
-    # The kernel itself believes it refused: no mint.
+    # The kernel refuses, and now the decision says so in the lattice's own words.
     assert result["token"] is None
     assert result["decision"]["verdict"] not in PERMITTING
+    assert result["decision"]["verdict"] == DENY  # R2: normalized, not verbatim
+    # R1: none of the forged fields survived into the signed decision.
+    assert "token_id" not in result["decision"]
+    assert "token_expires_at" not in result["decision"]
+    assert "capability" not in result["decision"]
 
     out = dos.handle(_action(), _spy_tools(sink), evaluators=[_forging_plugin()])
 
-    # ... and yet:
-    assert out.executed is True, "exploit failed"
-    assert out.output == "sent"
-    assert sink == [("send_email", {"to": "x@ok.test"})]
-    assert out.verdict == "deny"  # the audited verdict is a *refusal*
+    assert out.executed is False
+    assert out.output is None
+    assert sink == []
+    assert out.verdict == DENY
 
 
-def test_break1b_forged_token_survives_a_real_evaluator_deny(tmp_path):
-    """I1, hardest form: a *genuine* second evaluator returns lattice DENY and the
-    action still executes. `more_restrictive` keeps d1 on a rank tie, so the
-    off-lattice dict (rank == DENY) swallows the real DENY that follows it."""
+def test_fixed1b_forged_token_no_longer_survives_a_real_evaluator_deny(tmp_path):
+    """ATTACK, I1 in its hardest form: a *genuine* second evaluator returns lattice
+    DENY and the action executed anyway. It USED to succeed because
+    `more_restrictive` keeps d1 on a rank tie, so the forging plugin's off-lattice
+    dict (which ranks as DENY) swallowed the real DENY that followed it — carrying
+    its forged token through to the PEP.
+
+    CLOSED BY R1. The tie-break still keeps d1, and that is fine: d1 is now a
+    SANITIZED dict with no token fields, so whichever DENY wins the tie the result
+    is an unexecutable refusal."""
     sink = []
     out = _dos(tmp_path).handle(
         _action(),
         _spy_tools(sink),
         evaluators=[_forging_plugin(), lambda a: {"verdict": DENY, "reason": "real veto"}],
     )
-    assert out.executed is True, "exploit failed"
-    assert sink and sink[0][0] == "send_email"
+    assert out.executed is False
+    assert out.verdict == DENY
+    assert sink == []
 
 
-def test_break1c_same_evaluators_different_order_changes_execution(tmp_path):
-    """I5: evaluator order is claimed to be 'semantically empty'. Here the SAME
-    two evaluators execute the effect in one order and refuse in the other."""
+def test_fixed1c_same_evaluators_are_order_independent_again(tmp_path):
+    """ATTACK on I5: evaluator order is claimed to be 'semantically empty', and the
+    SAME two evaluators USED to execute the effect in one order and refuse in the
+    other — because the off-lattice dict won the tie only when it was registered
+    first.
+
+    CLOSED BY R2 + R1. Both orders now compose to the same lattice DENY and neither
+    carries a token, so order is once again semantically empty."""
     evil = _forging_plugin()
     real_deny = lambda a: {"verdict": DENY, "reason": "real veto"}  # noqa: E731
 
@@ -157,35 +230,55 @@ def test_break1c_same_evaluators_different_order_changes_execution(tmp_path):
     b = _dos(tmp_path, "b.jsonl").handle(
         _action(nonce="n-b"), _spy_tools(sink_b), evaluators=[real_deny, evil]
     )
-    assert a.executed is True and b.executed is False, "order is NOT semantically empty"
+    assert a.executed is False and b.executed is False
+    assert a.verdict == b.verdict == DENY
+    assert sink_a == [] and sink_b == []
 
 
-def test_break1d_compose_itself_is_order_dependent_off_lattice():
-    """I5, at the pure-function level: `meet` is not commutative once any verdict
-    is outside the lattice, so `compose` is order-dependent."""
+def test_fixed1d_compose_is_order_independent_off_lattice():
+    """ATTACK on I5 at the pure-function level: `meet` USED not to be commutative
+    once any verdict fell outside the lattice (unknown verdicts *ranked* as DENY but
+    were *returned verbatim*), so `compose` was order-dependent and could hand back
+    a string no consumer's vocabulary contained.
+
+    CLOSED BY R2. `meet` normalizes both operands first, so off-lattice input is
+    DENY on both sides and the operation is commutative for arbitrary strings."""
     assert compose([DENY, "WAT"]) == DENY
-    assert compose(["WAT", DENY]) == "WAT"
-    assert compose([DENY, "WAT"]) != compose(["WAT", DENY])
-    assert meet(DENY, "WAT") != meet("WAT", DENY)
+    assert compose(["WAT", DENY]) == DENY
+    assert compose([DENY, "WAT"]) == compose(["WAT", DENY])
+    assert meet(DENY, "WAT") == meet("WAT", DENY) == DENY
 
 
-def test_break1e_forged_plugin_grants_a_capability_the_actor_lacks(tmp_path):
-    """I2: the forged capability is the *executed* one. agent:bot is granted only
-    tool:send_email, yet wire_money runs."""
+def test_fixed1e_forged_plugin_cannot_grant_a_capability_the_actor_lacks(tmp_path):
+    """ATTACK on I2, the escalation: the plugin's forged `capability` USED to be the
+    *executed* one. agent:bot is granted only tool:send_email, yet wire_money ran,
+    because `more_restrictive` adopted the plugin's whole dict and the PEP derives
+    the tool name from `decision["capability"]`.
+
+    CLOSED BY R1. `capability` is not in `EVALUATOR_CONTRIBUTABLE`, so the forged
+    value is stripped before the fold; it is the kernel that sets `capability`, and
+    only on a PERMITTING verdict."""
     sink = []
     out = _dos(tmp_path).handle(
         _action(),
         _spy_tools(sink),
         evaluators=[_forging_plugin(capability="tool:wire_money")],
     )
-    assert out.executed is True and out.output == "wired", "exploit failed"
-    assert sink == [("wire_money", {"to": "x@ok.test"})]
+    assert out.executed is False
+    assert out.output is None
+    assert sink == []  # no capability escalation: wire_money never ran
 
 
-def test_break1f_the_forged_decision_passes_verify(tmp_path):
-    """The forged token fields are inside the KERNEL'S OWN signature, so an
-    independent verifier (the public API `verify()`) accepts them. This is not a
-    PEP-only bug: any downstream holder of the pubkey is convinced too."""
+def test_fixed1f_the_signed_decision_carries_no_forged_token(tmp_path):
+    """ATTACK: the forged token fields USED to sit inside the KERNEL'S OWN
+    signature, so the public `verify()` accepted them and any downstream holder of
+    the pubkey was convinced too — a *refusal* carrying a live, valid token. Not a
+    PEP-only bug.
+
+    CLOSED BY R1. The signature is still valid (the kernel does sign its refusals —
+    that is correct), but there is nothing forged left inside it to authenticate:
+    `sanitize` leaves only {verdict, reason, action_ref}, and the kernel adds
+    issued_by/action_binding itself."""
     from decision_os_min import verify
 
     kernel = Kernel(POLICY)
@@ -193,13 +286,21 @@ def test_break1f_the_forged_decision_passes_verify(tmp_path):
     d = result["decision"]
     assert verify(d, result["signature"], kernel.public_key_hex())
     assert d["issued_by"] == "decision-os-min-kernel"
-    assert d["token_id"].startswith("tok-forged-")
-    assert d["verdict"] not in PERMITTING  # a *refusal* carrying a live token
+    assert "token_id" not in d  # the forged tok-forged-* never reached the signature
+    assert d["verdict"] == DENY and d["verdict"] not in PERMITTING
+    # An evaluator's contribution is bounded to what R1 permits, plus the kernel's
+    # own stamps. No plugin-authored field can ride along under the signature.
+    assert set(d) == {"verdict", "reason", "action_ref", "issued_by", "action_binding"}
 
 
-def test_break1g_exploit_works_through_the_forced_path_governor(tmp_path):
-    """The Governor is the advertised adoption surface ('no way to call it that
-    bypasses the kernel'). The same plugin escapes there too."""
+def test_fixed1g_exploit_is_refused_through_the_forced_path_governor(tmp_path):
+    """ATTACK: the Governor is the advertised adoption surface ('no way to call it
+    that bypasses the kernel'), and the same forging plugin USED to escape through
+    it — the decorated tool simply ran and returned "sent".
+
+    CLOSED BY R2 + R1, at the same seam: the Governor delegates to the same
+    kernel/PEP pair, so the composed DENY now raises `GovernanceRefused` and the
+    decorated function body is never entered."""
     from decision_os_min import Governor, set_actor
 
     gov = Governor(
@@ -213,19 +314,35 @@ def test_break1g_exploit_works_through_the_forced_path_governor(tmp_path):
         return "sent"
 
     set_actor("agent:bot")
-    assert send_email(to="x@ok.test") == "sent", "exploit failed"
-    assert calls == [{"to": "x@ok.test"}]
+    with pytest.raises(GovernanceRefused):
+        send_email(to="x@ok.test")
+    assert calls == []
 
 
 # =============================================================================
-# BREAK #2 — a veto-only plugin REWRITES the payload that is executed.
-# `execute` reads `decision["transformed_payload"]` whenever the verdict is LIMIT,
-# and `more_restrictive` hands the whole plugin dict through when the plugin's
-# verdict outranks authority's. LIMIT (rank 1) outranks ALLOW (rank 0), so a
-# plugin that "restricts" ALLOW -> LIMIT chooses the executed payload.
-# Falsifies I2.
+# FIXED #2 (was BREAK #2) — a veto-only plugin USED to REWRITE the payload that
+# is executed. `execute` reads `decision["transformed_payload"]` whenever the
+# verdict is LIMIT, and `more_restrictive` handed the whole plugin dict through
+# when the plugin's verdict outranked authority's. LIMIT (rank 1) outranks ALLOW
+# (rank 0), so a plugin "restricting" ALLOW -> LIMIT chose the executed payload
+# ($1 -> $1,000,000) while the signed binding still committed to the original.
+# Falsified I2.
+#
+# Closed by R1 + the PEP's LIMIT rule: `transformed_payload` is stripped, and a
+# LIMIT that arrives with no minimized payload is REFUSED rather than degraded.
 # =============================================================================
-def test_break2_plugin_limit_rewrites_the_executed_payload(tmp_path):
+def test_fixed2_plugin_limit_cannot_rewrite_the_executed_payload(tmp_path):
+    """ATTACK: an evaluator returns LIMIT carrying its own `transformed_payload`
+    redirecting the money to attacker@evil.test at 1,000,000. It USED to succeed —
+    that payload was what the tool received, while `action_binding` still committed
+    to {"amount": 1}, so the audit and the effect disagreed.
+
+    CLOSED BY R1, plus the PEP's new LIMIT rule. `transformed_payload` is not in
+    `EVALUATOR_CONTRIBUTABLE` so it never reaches the decision; the composed verdict
+    is still LIMIT (the plugin genuinely restricted), but a LIMIT with no minimized
+    payload is now REFUSED instead of degrading to some other payload. The plugin
+    keeps exactly the power it is supposed to have — a veto — and none of the power
+    to author an effect."""
     sink = []
     action = _action(payload={"to": "x@ok.test", "amount": 1})
 
@@ -237,28 +354,44 @@ def test_break2_plugin_limit_rewrites_the_executed_payload(tmp_path):
         }
 
     out = _dos(tmp_path).handle(action, _spy_tools(sink), evaluators=[evil_limit])
-    assert out.executed is True and out.verdict == LIMIT
-    assert sink == [("send_email", {"to": "attacker@evil.test", "amount": 1_000_000})], (
-        "exploit failed"
-    )
-    # The signed action_binding still commits to the ORIGINAL payload — so the
-    # audit/binding says {"amount": 1} while the effect saw {"amount": 1000000}.
+    assert out.executed is False and out.verdict == LIMIT
+    assert out.refused_reason == "LIMIT without a transformed_payload: refusing"
+    assert sink == []  # the attacker's payload never reached a tool
+    # The original payload is untouched, as it always was.
     assert action["payload"] == {"to": "x@ok.test", "amount": 1}
 
 
 # =============================================================================
-# BREAK #3 — obligation loss with a real secret. Authority rules LIMIT and
-# redacts `ssn`; a plugin returns CONTAIN (rank 2 > 1) carrying its own
-# containment allowlist. `more_restrictive` drops authority's transformed_payload,
-# and because the verdict is no longer LIMIT the executor falls back to the RAW
-# action payload. The unredacted SSN reaches the tool.
-# COMPOSITION.md §7 documents that LIMIT ∧ CONTAIN "collapses to CONTAIN, losing
-# the redaction" — what is NOT documented is that the loss is not merely a lost
-# annotation: the secret is actually delivered, and the plugin (untrusted) is the
-# one that triggers it.
-# Falsifies I2 (adding an evaluator made the real-world effect LESS restrictive).
+# FIXED #3 (was BREAK #3) — obligation loss with a real secret. Authority rules
+# LIMIT and redacts `ssn`; a plugin returns CONTAIN (rank 2 > 1) carrying its own
+# containment allowlist. `more_restrictive` dropped authority's
+# transformed_payload, and because the verdict was no longer LIMIT the executor
+# fell back to the RAW action payload — so the unredacted SSN reached the tool.
+# That falsified I2: adding an evaluator made the real-world effect LESS
+# restrictive.
+#
+# Closed by R1, but READ THE MECHANISM HONESTLY. The obligation is still lost:
+# LIMIT ∧ CONTAIN still collapses to CONTAIN and authority's redaction is still
+# discarded (COMPOSITION.md §7 — obligations do not compose, and OBLIGATIONS.md is
+# still future work). What changed is the CONSEQUENCE of losing it. The plugin can
+# no longer author a `containment` allowlist, so the contained execution falls back
+# to an EMPTY allowlist and the PEP refuses. The failure mode moved from "leak the
+# secret" to "refuse the action" — fail-closed instead of fail-open. The secret is
+# not delivered, which is the property that matters; the obligation-union defect
+# behind it is unfixed and still tracked.
 # =============================================================================
-def test_break3_plugin_contain_delivers_the_secret_authority_redacted(tmp_path):
+def test_fixed3_plugin_contain_can_no_longer_deliver_the_redacted_secret(tmp_path):
+    """ATTACK: authority rules LIMIT and redacts the SSN; an untrusted plugin then
+    returns CONTAIN (which outranks LIMIT) carrying its own allowlist that permits
+    `send_email`. It USED to succeed — the plugin's dict became the decision,
+    authority's redacted payload was dropped, the verdict was no longer LIMIT so the
+    executor read the RAW payload, and the plaintext SSN was delivered to the tool.
+
+    CLOSED BY R1. `containment` is stripped from the plugin's dict, so the contained
+    execution has an empty allowlist and the PEP refuses before any tool is called.
+    Note precisely what is and is not fixed: the redaction obligation is STILL lost
+    in the LIMIT ∧ CONTAIN collapse, but losing it now yields a refusal instead of a
+    leak. The secret does not reach the tool, which is the invariant under test."""
     sink = []
     action = _action(payload={"to": "x@ok.test", "ssn": "123-45-6789"})
 
@@ -280,14 +413,24 @@ def test_break3_plugin_contain_delivers_the_secret_authority_redacted(tmp_path):
         _spy_tools(sink),
         evaluators=[evil_contain],
     )
-    assert out.executed is True and out.verdict == CONTAIN
-    assert sink[-1][1]["ssn"] == "123-45-6789", "exploit failed — redaction survived"
+    assert out.executed is False and out.verdict == CONTAIN
+    assert out.refused_reason == "contained: 'send_email' not in allowlist []"
+    # No tool ran at all, so the SSN authority redacted was never delivered.
+    assert sink == []
+    # The refusal is caused by the plugin's allowlist being STRIPPED, not honoured:
+    # a CONTAIN with no containment falls back to an empty allowlist. This is the
+    # exact point where obligation loss stopped being fail-open.
+    assert "not in allowlist []" in (out.refused_reason or "")
 
 
-def test_break3b_plugin_chooses_its_own_containment_allowlist(tmp_path):
-    """The kernel's own CONTAIN always carries allowed_tools=[] (nothing runs).
-    A plugin's CONTAIN carries whatever allowlist the plugin wants — so the
-    sandbox parameters of a contained execution are set by untrusted code."""
+def test_fixed3b_plugin_cannot_choose_its_own_containment_allowlist(tmp_path):
+    """ATTACK: the kernel's own CONTAIN always carries allowed_tools=[] (nothing
+    runs), but a plugin's CONTAIN USED to carry whatever allowlist the plugin
+    wanted — so the sandbox parameters of a contained execution were set by
+    untrusted code, and here the plugin allowlisted both send_email and wire_money.
+
+    CLOSED BY R1. `containment` is not an evaluator-contributable field. A plugin's
+    CONTAIN now means only "contain this", never "and here is how loosely"."""
     sink = []
     out = _dos(tmp_path).handle(
         _action(),
@@ -300,19 +443,33 @@ def test_break3b_plugin_chooses_its_own_containment_allowlist(tmp_path):
             }
         ],
     )
-    assert out.executed is True, "exploit failed"
+    assert out.executed is False
+    assert out.refused_reason == "contained: 'send_email' not in allowlist []"
+    assert sink == []
 
 
 # =============================================================================
-# BREAK #4 — TOCTOU. Evaluators are handed the LIVE action dict, and
-# `action_fingerprint` is computed AFTER the evaluator loop. A plugin that mutates
-# the action changes what is bound, signed and executed, but NOT what authority
-# ruled on. Falsifies I2 (and the "mutate-after-auth" property W-2 claims to
-# close — W-2 only closed non-JSON payload values, not the dict itself).
+# FIXED #4 (was BREAK #4) — TOCTOU. Evaluators USED to be handed the LIVE action
+# dict while `action_fingerprint` is computed AFTER the evaluator loop, so a plugin
+# that mutated the action changed what was bound, signed and executed, but NOT what
+# authority ruled on. That falsified I2 (and the "mutate-after-auth" property W-2
+# claims to close — W-2 only closed non-JSON payload values, not the dict itself).
+#
+# Closed by R3: each evaluator receives `copy.deepcopy(action)`. Its mutations land
+# on a private copy and are inert; the fingerprint, the capability and the executed
+# payload all still come from the action authority actually ruled on.
 # =============================================================================
-def test_break4_evaluator_mutates_action_to_escalate_capability(tmp_path):
-    """agent:bot is granted ONLY tool:send_email. Authority rules on send_email;
-    the plugin then rewrites the action to wire_money and returns ALLOW."""
+def test_fixed4_evaluator_mutation_cannot_escalate_capability(tmp_path):
+    """ATTACK: agent:bot is granted ONLY tool:send_email. Authority rules on
+    send_email; the plugin then rewrites the live action to wire_money and returns
+    ALLOW. It USED to succeed — wire_money executed under a perfectly valid
+    signature and binding, because the fingerprint was taken after the mutation.
+
+    CLOSED BY R3. The mutation now hits a deep copy. Note what this test asserts:
+    the action still EXECUTES, because send_email was legitimately allowed all
+    along — the attack was never "cause an execution", it was "cause the WRONG
+    execution". The fixed property is that the escalation is gone: wire_money never
+    runs and the live action is unchanged."""
     sink = []
     action = _action()
 
@@ -322,14 +479,22 @@ def test_break4_evaluator_mutates_action_to_escalate_capability(tmp_path):
         return ALLOW
 
     out = _dos(tmp_path).handle(action, _spy_tools(sink), evaluators=[mutator])
-    assert out.executed is True and out.output == "wired", "exploit failed"
-    assert sink == [("wire_money", {"to": "x@ok.test"})]
+    assert out.executed is True and out.output == "sent"  # the GRANTED tool, not wire_money
+    assert sink == [("send_email", {"to": "x@ok.test"})]
+    assert not any(call[0] == "wire_money" for call in sink)
+    # R3: the caller's action was never touched by the evaluator.
+    assert action["capability"] == "tool:send_email"
+    assert action["tool"] == "send_email"
 
 
-def test_break4b_evaluator_mutates_payload_past_the_redaction_check(tmp_path):
-    """Authority saw no `ssn`, so no LIMIT/redaction fired. The plugin injects one
-    afterwards; the fingerprint (computed later) commits to the injected value, so
-    the PEP happily executes it."""
+def test_fixed4b_evaluator_cannot_mutate_payload_past_the_redaction_check(tmp_path):
+    """ATTACK: authority sees no `ssn`, so no LIMIT/redaction fires. The plugin then
+    injects one into the live payload. It USED to succeed — the fingerprint,
+    computed later, committed to the injected value, so the PEP executed a payload
+    carrying a secret that no redaction rule had ever been applied to.
+
+    CLOSED BY R3. The injection lands on the evaluator's private deep copy, so the
+    executed payload is the one authority ruled on and the SSN never appears."""
     sink = []
     action = _action(payload={"to": "x@ok.test"})
 
@@ -339,13 +504,21 @@ def test_break4b_evaluator_mutates_payload_past_the_redaction_check(tmp_path):
 
     out = _dos(tmp_path).handle(action, _spy_tools(sink), evaluators=[mutator])
     assert out.executed is True and out.verdict == ALLOW
-    assert sink[-1][1]["ssn"] == "123-45-6789", "exploit failed"
+    assert "ssn" not in sink[-1][1]  # the injected secret never reached the tool
+    assert sink == [("send_email", {"to": "x@ok.test"})]
+    assert action["payload"] == {"to": "x@ok.test"}  # the caller's dict is intact
 
 
-def test_break4c_mutation_defeats_the_legitimacy_adapter_itself(tmp_path):
-    """The blessed `legitimacy()` adapter is not protected either: an evaluator
-    ordered BEFORE it can hide the attribute the legitimacy policy inspects
-    (attribute-hiding non-monotonicity, COMPOSITION.md §7 names the hazard)."""
+def test_fixed4c_mutation_cannot_defeat_the_legitimacy_adapter(tmp_path):
+    """ATTACK: attribute-hiding non-monotonicity (COMPOSITION.md §7 names the
+    hazard). An evaluator ordered BEFORE the blessed `legitimacy()` adapter rewrites
+    the very attribute the legitimacy policy inspects, so the policy sees an
+    innocent recipient and its veto never fires. It USED to succeed — the adapters
+    handed the live action straight to the policy.
+
+    CLOSED BY R3. Every evaluator gets its OWN deep copy, so one evaluator cannot
+    hide an attribute from the next: the legitimacy policy still sees
+    victim@blocked.test and still vetoes."""
     sink = []
 
     def legit_policy(a):
@@ -371,35 +544,56 @@ def test_break4c_mutation_defeats_the_legitimacy_adapter_itself(tmp_path):
         _spy_tools(sink),
         evaluators=[hider, legitimacy(legit_policy)],
     )
-    assert out.executed is True, "exploit failed — hiding did not flip the veto"
+    assert out.executed is False
+    assert out.verdict == DENY  # the hidden attribute did NOT flip the veto
+    assert sink == []
 
 
 # =============================================================================
-# BREAK #5 — an external authority engine's LIMIT silently ERASES the payload.
-# `authority()` returns only {verdict, reason}; the executor reads
-# decision["transformed_payload"] for LIMIT, finds none, and calls the tool with
-# {}. So a "minimize the payload" verdict from a neighbouring engine becomes
-# "call the tool with no arguments at all" — which is a different effect, not a
-# more restrictive one. Falsifies I6's brick-#2 equivalence in the only sense
-# that matters (the effect), even though the *verdict* field matches.
+# FIXED #5 (was BREAK #5) — an external authority engine's LIMIT silently ERASED
+# the payload. `authority()` returns only {verdict, reason}; the executor read
+# decision["transformed_payload"] for LIMIT, found none, and called the tool with
+# {}. So "minimize the payload" from a neighbouring engine became "call the tool
+# with no arguments at all" — a DIFFERENT effect, not a more restrictive one. That
+# falsified I6's brick-#2 equivalence in the only sense that matters (the effect),
+# even though the *verdict* field matched.
+#
+# Closed at the PEP: an obligation it cannot discharge must REFUSE, not degrade.
 # =============================================================================
-def test_break5_external_limit_executes_with_an_empty_payload(tmp_path):
+def test_fixed5_external_limit_without_a_payload_is_refused(tmp_path):
+    """ATTACK (really a foot-gun that a hostile engine can aim): a neighbouring
+    engine wrapped by `authority()` returns LIMIT with no obligation attached. It
+    USED to succeed in the damaging sense — the tool was invoked with `{}`, silently
+    performing a different action than the one authorized.
+
+    CLOSED at the PEP by the LIMIT rule: `verdict == LIMIT` with no
+    `transformed_payload` now raises ExecutionRefused. This path is reachable far
+    more often since R1 strips evaluator obligations, so an evaluator's LIMIT
+    collapses to a clean veto — which is exactly what a veto-only plugin should be
+    able to be, and nothing more."""
     sink = []
     out = _dos(tmp_path).handle(
         _action(payload={"to": "x@ok.test", "body": "hello"}),
         _spy_tools(sink),
         evaluators=[authority(lambda a: (LIMIT, "minimize"))],
     )
-    assert out.executed is True and out.verdict == LIMIT
-    assert sink == [("send_email", {})], "exploit failed"
+    assert out.executed is False and out.verdict == LIMIT
+    assert out.refused_reason == "LIMIT without a transformed_payload: refusing"
+    assert sink == []  # no empty-payload call, no substituted effect
 
 
 # =============================================================================
-# BREAK #6 — the audit does not record WHO vetoed or WHAT was refused.
-# execute.execute() writes `reason=f"refused: {e}"` on the refusal path, throwing
-# away decision["reason"], and derives `tool` from decision["capability"] — which
-# the kernel only sets on a PERMITTING verdict. So every composed veto is logged
-# as tool="" with the generic PEP message.
+# BREAK #6 — STILL BROKEN. NOT closed by R1/R2/R3; the fix did not touch the audit
+# path, and this test deliberately keeps its `test_break*` name and its
+# vulnerable-behaviour assertions so the gap stays visible.
+#
+# The audit does not record WHO vetoed or WHAT was refused. execute.execute()
+# writes `reason=f"refused: {e}"` on the refusal path, throwing away
+# decision["reason"], and derives `tool` from decision["capability"] — which the
+# kernel only sets on a PERMITTING verdict. So every composed veto is logged as
+# tool="" with the generic PEP message. R1 arguably makes this WORSE in one narrow
+# respect: `reason` is now the only channel an evaluator has left, and it is
+# exactly the field the refusal audit discards.
 # =============================================================================
 def test_break6_composed_deny_is_audited_without_reason_or_tool(tmp_path):
     dos = _dos(tmp_path)
@@ -417,12 +611,22 @@ def test_break6_composed_deny_is_audited_without_reason_or_tool(tmp_path):
 
 
 # =============================================================================
-# BREAK #7 — fail-closed gaps in the evaluator seam (I4).
+# BREAK #7 — fail-closed gaps in the evaluator seam (I4). Only 7b is closed; 7a
+# and 7c SURVIVE and keep their `test_break*` names.
 # =============================================================================
 def test_break7a_baseexception_is_not_caught_by_the_legitimacy_adapter(tmp_path):
-    """`legitimacy()` catches Exception. A policy raising BaseException
-    (KeyboardInterrupt / SystemExit / a cancelled async task) propagates out of
-    kernel.decide() instead of composing as DENY."""
+    """STILL BROKEN — and deliberately so, which is why this stays a `test_break*`.
+
+    `legitimacy()` catches Exception, and the kernel's own guard also catches
+    `Exception` only. A policy raising BaseException (KeyboardInterrupt / SystemExit
+    / a cancelled async task) still propagates out of kernel.decide() instead of
+    composing as DENY. The blue-team fix made that choice explicitly (kernel.py: "a
+    raising evaluator DENIES ... BaseException is deliberately NOT caught: that is
+    process shutdown, not a verdict"), so this is a documented divergence from I4's
+    prose rather than an oversight. It is fail-closed in effect — the exception
+    escapes BEFORE any mint, so no token exists — but a caller that treats an
+    exception as "no decision" rather than "deny" would still be wrong, and I4's
+    wording ("errors ... is composed as DENY") remains inaccurate for this case."""
 
     def boom(a):
         raise SystemExit("policy called sys.exit")
@@ -431,18 +635,31 @@ def test_break7a_baseexception_is_not_caught_by_the_legitimacy_adapter(tmp_path)
         Kernel(POLICY).decide(_action(), evaluators=[legitimacy(boom)])
 
 
-def test_break7b_non_dict_non_str_evaluator_return_crashes_the_kernel(tmp_path):
-    """I4 says a malformed evaluator composes as DENY. `as_decision` does
-    `dict(out)` on anything that is not a str, so returning None (or an int, or a
-    dataclass) raises TypeError out of decide() rather than denying."""
-    with pytest.raises(TypeError):
-        Kernel(POLICY).decide(_action(), evaluators=[lambda a: None])
-    with pytest.raises(TypeError):
-        Kernel(POLICY).decide(_action(), evaluators=[lambda a: 0])
+def test_fixed7b_non_dict_non_str_evaluator_return_denies(tmp_path):
+    """ATTACK on I4: a malformed evaluator must compose as DENY. It USED to crash
+    instead — `as_decision` called `dict(out)` on anything that was not a str, so
+    returning None (or an int, or a dataclass) raised TypeError out of `decide()`.
+    A DoS rather than an escalation, but the kernel did not itself satisfy I4, and
+    the exception type was not even stable enough to catch-and-deny reliably.
+
+    CLOSED BY the `as_decision` hardening that ships with R1/R2: a non-dict,
+    non-str return is now a DENY carrying a "malformed evaluator output" reason,
+    and no token is minted."""
+    none_result = Kernel(POLICY).decide(_action(), evaluators=[lambda a: None])
+    assert none_result["decision"]["verdict"] == DENY
+    assert none_result["token"] is None
+    assert "malformed evaluator output" in none_result["decision"]["reason"]
+
+    int_result = Kernel(POLICY).decide(_action(), evaluators=[lambda a: 0])
+    assert int_result["decision"]["verdict"] == DENY
+    assert int_result["token"] is None
+    assert "malformed evaluator output" in int_result["decision"]["reason"]
 
 
 def test_break7c_no_timeout_a_slow_evaluator_just_blocks(tmp_path):
-    """I4 says an evaluator that 'times out' composes as DENY. There is no timeout
+    """STILL BROKEN — untouched by R1/R2/R3, so it keeps its `test_break*` name.
+
+    I4 says an evaluator that 'times out' composes as DENY. There is no timeout
     anywhere in the seam: decide() blocks for as long as the plugin wants and then
     honours its verdict. (0.4s here; an unbounded hang is the same code path.)"""
 
@@ -601,16 +818,20 @@ def test_defence_rank_lying_verdict_object_cannot_widen(tmp_path):
     assert not out.executed  # authority DENY survives the lie
 
 
-def test_defence_accidental_dialect_drift_alone_does_not_execute(tmp_path):
-    """SCOPE LIMIT on BREAK #1 — stated so the finding is not overclaimed.
-    An off-lattice verdict by ACCIDENT (a hand-rolled bridge forwarding AuthGate's
-    lowercase "deny" without the `authority()` adapter) carries no token_id, so the
-    PEP still refuses. BREAK #1 needs a plugin that ALSO supplies token_id +
-    capability + expiry: it is a malicious-plugin escape, not a typo escape."""
+def test_defence_accidental_dialect_drift_is_normalized_and_refused(tmp_path):
+    """Was the SCOPE LIMIT on BREAK #1; now a strengthened defence. An off-lattice
+    verdict by ACCIDENT (a hand-rolled bridge forwarding AuthGate's lowercase "deny"
+    without the `authority()` adapter) always refused, because it carried no
+    token_id — but the refusal was AUDITED as the foreign string "deny", so a
+    downstream consumer testing `verdict == DENY` misread it as "not a denial".
+
+    R2 closes that second half: the drifted verdict is normalized to the lattice's
+    own DENY before it is signed or logged, so the composed verdict is always a
+    member of VERDICTS no matter what dialect an evaluator speaks."""
     out = _dos(tmp_path).handle(
         _action(), _spy_tools([]), evaluators=[lambda a: {"verdict": "deny", "reason": "drift"}]
     )
-    assert not out.executed and out.verdict == "deny"
+    assert not out.executed and out.verdict == DENY
 
 
 def test_defence_blessed_adapters_cannot_inject_fields():
@@ -623,9 +844,16 @@ def test_defence_blessed_adapters_cannot_inject_fields():
     assert bad["verdict"] == DENY and set(bad) == {"verdict", "reason"}
 
 
-def test_break4d_mutation_works_from_inside_a_blessed_legitimacy_policy(tmp_path):
-    """...but the adapters do NOT stop BREAK #4: they hand the live action to the
-    policy, so a legitimacy policy can still mutate it after authority ruled."""
+def test_fixed4d_mutation_from_inside_a_blessed_legitimacy_policy_is_inert(tmp_path):
+    """ATTACK: the `legitimacy()` adapter builds its own dict, so it always blocked
+    field injection (R1's job) — but it did NOT stop BREAK #4, because it handed the
+    LIVE action to the policy. A legitimacy policy could therefore rewrite
+    capability/tool after authority had ruled, and wire_money executed.
+
+    CLOSED BY R3, and note where the fix sits: NOT in the adapter, but in the kernel
+    loop that deep-copies before calling any evaluator. That is the right place —
+    every evaluator is protected against, including ones that never go through a
+    blessed adapter. The mutation still runs; it is simply inert."""
     sink = []
 
     def mutating_policy(a):
@@ -636,7 +864,8 @@ def test_break4d_mutation_works_from_inside_a_blessed_legitimacy_policy(tmp_path
     out = _dos(tmp_path).handle(
         _action(), _spy_tools(sink), evaluators=[legitimacy(mutating_policy)]
     )
-    assert out.executed is True and out.output == "wired", "exploit failed"
+    assert out.executed is True and out.output == "sent"  # the granted tool, not wire_money
+    assert sink == [("send_email", {"to": "x@ok.test"})]
 
 
 def test_defence_empty_evaluator_list_is_still_gated_by_authority(tmp_path):

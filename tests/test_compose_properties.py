@@ -12,41 +12,51 @@ The ordering below (`_ORDER`) is re-stated FROM THE SPEC (COMPOSITION.md §3)
 rather than imported from `compose._RANK`, so these tests compare the
 implementation against the contract, not against itself.
 
-EVERY PROPERTY IN THE BRIEF HOLDS — but three of them hold only in a weaker form
-than the prose claims, and the gap is where the findings are. Four are pinned
-here, not papered over; see the tests named `test_FINDING_*`:
+EVERY PROPERTY IN THE BRIEF HELD — but four of them once held only in a weaker
+form than the prose claimed, and those gaps were pinned here as `test_FINDING_*`
+tests asserting the honest weakness rather than the property we wanted. The
+blue-team fix (COMPOSITION.md §11, root causes R1/R2/R3) has removed all four, so
+each is now restated as the STRENGTHENED property it has become. They remain
+Hypothesis property tests over the same strategies — including the off-lattice
+strings that produced the original counterexamples — so a regression is found by
+search, not by our imagination:
 
-  F1. `meet` is commutative/associative/permutation-invariant **up to rank**, not
-      up to string identity. Off-lattice strings all rank as DENY but are returned
-      verbatim, so `meet(DENY, "WAT") == "DENY"` while `meet("WAT", DENY) == "WAT"`,
-      and `compose` can return a string that is not a member of `VERDICTS`. It is
-      fail-closed (nothing off-lattice is in `PERMITTING`, so no token is minted),
-      but a downstream consumer testing `verdict == DENY` instead of
-      `verdict not in PERMITTING` would misread it.
+  F1 -> CLOSED by R2 (`normalize`). `meet` was commutative/associative/
+      permutation-invariant only **up to rank**: off-lattice strings ranked as DENY
+      but were returned verbatim, so `meet(DENY, "WAT") == "DENY"` while
+      `meet("WAT", DENY) == "WAT"`, and `compose` could return a string that was not
+      a member of `VERDICTS`. `meet` now normalizes both operands, so the laws hold
+      VERBATIM over arbitrary strings and `compose` always returns a member of
+      `VERDICTS`. See `test_meet_is_commutative_verbatim_for_arbitrary_strings` and
+      `test_compose_always_returns_a_member_of_the_vocabulary`.
 
-  F2. Invariant 4 (fail-closed composition) is NOT enforced at the kernel
-      boundary — only inside the `evaluators.py` wrappers. A raw evaluator whose
-      return value is neither a str nor a mapping, or whose "verdict" is
-      unhashable, makes `Kernel.decide` raise rather than compose as DENY. No
-      token is minted, so it is a DoS and not an escalation, but the exception
-      escapes the kernel.
+  F2 -> CLOSED by the `as_decision` hardening. Invariant 4 (fail-closed
+      composition) was enforced only inside the `evaluators.py` wrappers, so a raw
+      evaluator returning a non-str non-mapping, or an unhashable "verdict", made
+      `Kernel.decide` raise instead of composing as DENY. Both now compose as DENY.
+      See `test_a_non_mapping_evaluator_return_denies_instead_of_raising`.
 
-  F3. "Evaluator order carries no semantic meaning" is proved here for the
-      VERDICT and is false for the OBLIGATION. Two evaluators tying at LIMIT with
-      different `transformed_payload`s agree on the verdict and disagree on what
-      actually executes; `more_restrictive` breaks the tie by registration order.
-      COMPOSITION.md §7 flags that obligations do not compose — this is the
-      operational consequence.
+  F3 -> CLOSED by R1 (`sanitize`), in the only way it honestly could be. "Order
+      carries no semantic meaning" was true of the VERDICT and false of the
+      OBLIGATION: two evaluators tying at LIMIT with different
+      `transformed_payload`s agreed on the verdict and disagreed on what executed.
+      An evaluator can no longer carry an obligation at all, so there is nothing
+      left for registration order to select — and a LIMIT with no obligation is
+      refused by the PEP rather than degraded. Obligations still do not COMPOSE
+      (COMPOSITION.md §7); they are now refused instead of silently order-selected.
+      One residual is pinned inside that test: the `reason` string is still chosen
+      by registration order, and it is what lands in the audit log.
 
-  F4. A governing evaluator can overwrite the signed `action_ref`, because
-      `as_decision` uses `setdefault` for it. Fail-closed (the PEP then refuses
-      the decision), so it is a plugin-triggerable DoS inside the antitone
-      guarantee — but an untrusted veto-only plugin should not be able to write
-      an identity field of a signed decision at all.
+  F4 -> CLOSED by R1. `as_decision` used `setdefault` for `action_ref`, letting a
+      governing evaluator write an identity field of a signed decision (a
+      plugin-triggerable DoS, since the PEP then refused the decision). It now
+      ASSIGNS `action_ref` from the action, unconditionally.
 
-None of the four is an escalation: no combination of evaluator inputs found by
-Hypothesis ever produced a token for a non-permitting composed verdict, or made
-the kernel less restrictive than its own authority ruling.
+None of the four was ever an escalation on its own: no combination of evaluator
+VERDICTS found by Hypothesis ever produced a token for a non-permitting composed
+verdict, or made the kernel less restrictive than its own authority ruling. The
+escalations lived in the fields around the verdict, and are covered by
+`test_redteam_composition.py`.
 """
 
 from __future__ import annotations
@@ -128,24 +138,56 @@ def test_meet_is_associative_verbatim_on_the_lattice(a: str, b: str, c: str) -> 
 @given(a=any_verdict)
 def test_meet_is_idempotent(a: str) -> None:
     """Consulting the same evaluator twice must change nothing — this is what makes
-    retries and duplicated plugin registrations safe."""
-    assert meet(a, a) == a
+    retries and duplicated plugin registrations safe.
+
+    Stated on the NORMALIZED value: `meet(a, a)` is idempotent as a lattice
+    operation, and for an off-lattice `a` the single lattice element it denotes is
+    DENY. Before R2 this was `meet(a, a) == a` verbatim — which passed only because
+    the unknown string was handed back unchanged, i.e. it passed for the reason that
+    was the bug."""
+    assert meet(a, a) == meet(meet(a, a), a)
+    assert meet(a, a) == (a if a in VERDICTS else DENY)
 
 
 @given(a=any_verdict, b=any_verdict)
 def test_meet_returns_the_more_restrictive_operand(a: str, b: str) -> None:
-    """The defining property: meet is a greatest-lower-bound in restrictiveness."""
+    """The defining property: meet is a greatest-lower-bound in restrictiveness.
+
+    R2 strengthens the second half. `meet` still never invents a verdict — it
+    selects an operand — but it selects the operand's LATTICE ELEMENT, so the
+    returned value is always a member of `VERDICTS` even when the operands are not.
+    An evaluator speaking a foreign dialect can therefore never put a string into a
+    signed decision that no consumer's vocabulary contains."""
     assert rank(meet(a, b)) == max(rank(a), rank(b))
-    assert meet(a, b) in (a, b)  # it selects an operand; it never invents a verdict
+    normalized = (a if a in VERDICTS else DENY, b if b in VERDICTS else DENY)
+    assert meet(a, b) in normalized  # selects an operand; never invents a verdict
+    assert meet(a, b) in VERDICTS  # ...and always lands inside the vocabulary
 
 
 # --- 2. identity and absorbing element --------------------------------------
-@given(x=any_verdict)
-def test_allow_is_the_identity(x: str) -> None:
+@given(x=lattice_verdicts)
+def test_allow_is_the_identity_for_lattice_members(x: str) -> None:
     """An evaluator that ALLOWs contributes nothing — the formal content of
-    "a non-authority evaluator's ALLOW grants no permission"."""
+    "a non-authority evaluator's ALLOW grants no permission". This is the identity
+    law proper, and it is stated where an identity law belongs: over the lattice's
+    own elements."""
     assert meet(ALLOW, x) == x
     assert meet(x, ALLOW) == x
+
+
+@given(x=off_lattice)
+def test_allow_composed_with_an_off_lattice_verdict_is_deny(x: str) -> None:
+    """The other half of the old `test_allow_is_the_identity`, which used to quantify
+    over ANY string and passed only because an unknown verdict was returned verbatim
+    — so `meet(ALLOW, "WAT") == "WAT"` looked like the identity law when it was
+    really the R2 bug wearing the law's clothes.
+
+    Off-lattice input is not an element of the lattice, so ALLOW cannot be its
+    identity; it is normalized to DENY first. Composing an unknown verdict with
+    ALLOW therefore DENIES — fail-closed, and in the lattice's own vocabulary."""
+    assert meet(ALLOW, x) == DENY
+    assert meet(x, ALLOW) == DENY
+    assert meet(ALLOW, x) not in PERMITTING
 
 
 @given(x=any_verdict)
@@ -158,17 +200,30 @@ def test_deny_is_absorbing(x: str) -> None:
 
 
 @given(x=off_lattice)
-def test_FINDING_absorption_is_only_up_to_rank_for_off_lattice_verdicts(x: str) -> None:
-    """FINDING F1. `meet(x, DENY)` returns `x`, not the string "DENY", whenever `x`
-    is off-lattice — the two are rank-equal so the *decision* is right, but the
-    returned token is a string no consumer's vocabulary contains. Pinned rather
-    than smoothed over: the safe read of a verdict is `not in PERMITTING`, never
-    `== DENY`. Fixing it would mean normalizing unknown verdicts to DENY in
-    `_rank`'s caller — a one-line change to `meet`, deliberately not made here."""
-    assert meet(x, DENY) == x
+def test_meet_is_commutative_verbatim_for_arbitrary_strings(x: str) -> None:
+    """WAS FINDING F1 — now the strengthened property.
+
+    `meet(x, DENY)` used to return `x`, not the string "DENY", whenever `x` was
+    off-lattice. The two were rank-equal so the *decision* was right, but the
+    returned value was a string no consumer's vocabulary contained, and
+    commutativity failed at the string level: `meet(DENY, "WAT") != meet("WAT",
+    DENY)`. A consumer testing `verdict == DENY` — a natural, wrong-but-plausible
+    read — saw a refusal as "not a denial".
+
+    R2's `normalize` makes absorption hold verbatim over arbitrary `str` VALUES,
+    not merely up to rank. This is the one-line change the old docstring described
+    as "deliberately not made here"; it has now been made.
+
+    SCOPE LIMIT, stated so this is not read as more than it is: `normalize` tests
+    `verdict in _RANK`, a hash lookup. A `str` SUBCLASS with a lying `__eq__`/
+    `__hash__` can collide with a lattice member and be returned verbatim, so the
+    law is over plain strings, not over every object that is `isinstance(x, str)`.
+    That residual is fail-closed and pinned in
+    `test_redteam_composition.test_finding_R2_normalize_is_bypassable_by_a_lying_str_subclass`."""
+    assert meet(x, DENY) == DENY
     assert meet(DENY, x) == DENY
-    assert meet(x, DENY) != meet(DENY, x)  # commutativity fails at string level
-    assert meet(x, DENY) not in VERDICTS  # ...and the result escapes the vocabulary
+    assert meet(x, DENY) == meet(DENY, x)  # commutativity now holds string-level
+    assert meet(x, DENY) in VERDICTS  # ...and the result stays in the vocabulary
 
 
 # --- 3. compose is the fold, and is permutation-invariant -------------------
@@ -197,17 +252,22 @@ def test_compose_permutation_invariance_is_verbatim_on_the_lattice(
     assert compose(verdicts) == compose(data.draw(st.permutations(verdicts)))
 
 
-@given(x=off_lattice)
-def test_FINDING_compose_can_return_a_string_outside_the_vocabulary(x: str) -> None:
-    """FINDING F1, continued. Permutation invariance is rank-level only: the two
-    orderings below agree on the DECISION and disagree on the STRING. `VERDICTS`
-    exists so adapters can reject foreign verdicts, yet `compose` itself can hand
-    one back."""
-    assume(x != DENY)
-    assert compose([x, DENY]) == x
-    assert compose([DENY, x]) == DENY
-    assert compose([x, DENY]) not in VERDICTS
-    assert compose([x, DENY]) not in PERMITTING  # still fail-closed, which is the point
+@given(verdicts=verdict_lists)
+def test_compose_always_returns_a_member_of_the_vocabulary(verdicts: list[str]) -> None:
+    """WAS FINDING F1, continued — now the strengthened property, and quantified
+    over whole LISTS rather than the single off-lattice string of the finding.
+
+    Permutation invariance used to be rank-level only: `compose([x, DENY])` returned
+    `x` while `compose([DENY, x])` returned "DENY" — the same decision, different
+    strings. `VERDICTS` exists so adapters can reject foreign verdicts, yet `compose`
+    itself could hand one back.
+
+    Post-R2 the composed verdict is ALWAYS a member of `VERDICTS`, whatever dialects
+    the evaluators spoke, and permutation invariance is verbatim rather than up to
+    rank. (Same scope limit as above: plain `str` values, not lying `str`
+    subclasses.)"""
+    assert compose(verdicts) in VERDICTS
+    assert compose(list(reversed(verdicts))) == compose(verdicts)
 
 
 # --- 4. antitone: adding evaluators can only restrict -----------------------
@@ -300,20 +360,31 @@ def test_kernel_verdict_is_independent_of_evaluator_order(
 
 @settings(deadline=None)
 @given(payload_a=st.text(max_size=4), payload_b=st.text(max_size=4))
-def test_FINDING_order_independence_covers_the_verdict_but_not_the_obligation(
+def test_an_evaluator_obligation_cannot_be_order_selected(
     payload_a: str, payload_b: str
 ) -> None:
-    """FINDING F3 — the sharpest one. "Evaluator order carries no semantic meaning"
-    is proved above FOR THE VERDICT. It is FALSE for the obligation attached to the
-    verdict, which is the field that actually shapes execution. `more_restrictive`
-    keeps `d1` on a tie, so two evaluators tying at LIMIT with different
-    `transformed_payload`s produce the same verdict and DIFFERENT executed payloads
-    depending purely on registration order. COMPOSITION.md §7 records that
-    obligations do not compose; this shows the consequence is not merely "we lose
-    an obligation" but "the surviving obligation is order-selected".
+    """WAS FINDING F3, the sharpest one — now the strengthened property.
 
-    Asserted as the CURRENT behaviour so a future obligation-union implementation
-    breaks this test loudly."""
+    "Evaluator order carries no semantic meaning" was proved above FOR THE VERDICT,
+    and was FALSE for the obligation attached to it — the field that actually shapes
+    execution. `more_restrictive` keeps `d1` on a tie, so two evaluators tying at
+    LIMIT with different `transformed_payload`s produced the same verdict and
+    DIFFERENT executed payloads depending purely on registration order.
+
+    R1 closes it at the root: `transformed_payload` is not evaluator-contributable,
+    so neither evaluator carries an obligation and there is nothing for registration
+    order to select. Both orders yield the identical decision content. Note this is
+    a refusal to honour an unverified obligation, not an obligation-union
+    implementation — COMPOSITION.md §7 still stands, and the PEP now REFUSES a LIMIT
+    that arrives with no payload rather than executing something else.
+
+    RESIDUAL, pinned deliberately rather than smoothed over: `reason` IS still
+    evaluator-contributable, and `more_restrictive`'s tie-break still selects it by
+    registration order — so the SIGNED decision's reason string, which every
+    downstream verifier reads, depends on which plugin was registered first. It
+    cannot shape an effect, so it is a provenance defect and not an authorization
+    one, but it is the last place where evaluator order is not semantically
+    empty."""
     assume(payload_a != payload_b)
     first = _obligation_evaluator(payload_a)
     second = _obligation_evaluator(payload_b)
@@ -322,34 +393,40 @@ def test_FINDING_order_independence_covers_the_verdict_but_not_the_obligation(
     ba = KERNEL.decide(ACTION, evaluators=[second, first])["decision"]
 
     assert ab["verdict"] == ba["verdict"] == LIMIT  # verdict: order-free, as claimed
-    assert ab["transformed_payload"] != ba["transformed_payload"]  # obligation: NOT
-    assert ab["reason"] != ba["reason"]  # nor the reason that lands in the audit log
+    # R1: the obligation never made it into either decision, so it cannot differ.
+    assert "transformed_payload" not in ab
+    assert "transformed_payload" not in ba
+    # RESIDUAL: the reason is still tie-broken by registration order.
+    assert ab["reason"] != ba["reason"]
 
 
 @settings(deadline=None)
 @given(forged=st.text(alphabet=_PRINTABLE, min_size=1, max_size=8))
-def test_FINDING_a_governing_evaluator_can_overwrite_the_signed_action_ref(
+def test_a_governing_evaluator_cannot_overwrite_the_signed_action_ref(
     forged: str,
 ) -> None:
-    """FINDING F4. `as_decision` sets `action_ref` with `setdefault`, so an
-    evaluator that WINS the fold (any verdict strictly more restrictive than
-    authority's) carries its own `action_ref` into the signed decision — a field an
-    untrusted, veto-only plugin should have no say over.
+    """WAS FINDING F4 — now the strengthened property.
 
-    It is fail-closed, not an escalation: `action_binding` is recomputed by the
-    kernel from the real action, and the PEP's W-1 check then compares the live
-    nonce against the corrupted `action_ref` and refuses. So the reachable effect
-    is that a plugin can silently render a PERMITTING decision unexecutable (DoS),
-    which is inside the antitone guarantee. Still a defect: the fix is for
-    `as_decision` to ASSIGN `action_ref` from the action rather than defer to the
-    evaluator. Not fixed here — this file's job is falsification, not repair."""
+    `as_decision` used to set `action_ref` with `setdefault`, so an evaluator that
+    WON the fold (any verdict strictly more restrictive than authority's) carried
+    its own `action_ref` into the signed decision — an identity field an untrusted,
+    veto-only plugin should have no say over. It was fail-closed rather than an
+    escalation (the PEP's W-1 check then refused the decision), so the reachable
+    effect was a plugin silently rendering a PERMITTING decision unexecutable.
+
+    R1 assigns `action_ref` from the action unconditionally: `action_ref` is one of
+    the three keys an evaluator may nominally contribute, but `as_decision`
+    immediately overwrites it with the kernel's value. The forged reference is
+    discarded for every string Hypothesis can produce, and the decision stays
+    executable."""
     assume(forged != ACTION["nonce"])
     out = KERNEL.decide(
         ACTION, evaluators=[lambda action: {"verdict": LIMIT, "action_ref": forged}]
     )
-    assert out["decision"]["action_ref"] == forged  # plugin-controlled, and signed
-    assert out["token"]["action_ref"] == forged
-    # ...but the binding still commits to the REAL action, which is why it is safe.
+    assert out["decision"]["action_ref"] == ACTION["nonce"]  # kernel-controlled
+    assert out["decision"]["action_ref"] != forged
+    assert out["token"]["action_ref"] == ACTION["nonce"]
+    # ...and the binding still commits to the REAL action, as it always did.
     assert out["token"]["action_binding"] == out["decision"]["action_binding"]
     assert out["decision"]["action_binding"] == action_fingerprint(ACTION)
 
@@ -421,36 +498,63 @@ def test_as_decision_fails_closed_on_a_verdictless_dict(reason: str) -> None:
     assert as_decision({"reason": reason}, ACTION)["verdict"] == DENY
 
 
-# --- FINDING F2: fail-closed stops at the evaluators.py wrappers -------------
-def test_FINDING_kernel_raises_instead_of_denying_on_a_non_mapping_evaluator() -> None:
-    """FINDING F2. COMPOSITION.md Invariant 4 says an evaluator that "errors, times
-    out, or returns an unknown verdict is composed as DENY". That holds for the
-    wrappers in `evaluators.py`, which catch — but `Kernel.decide` calls a raw
-    evaluator unguarded, so a plugin returning a non-str, non-mapping value makes
-    the kernel raise. No token is minted (the exception escapes before the mint),
-    so this is a DoS, not an escalation — but the kernel does not itself satisfy
-    Invariant 4, and a caller that treats an exception as "no decision" rather than
-    "deny" would be wrong. Pinned as the current behaviour, not asserted as
-    correct. Note the exception TYPE is not even stable (TypeError for a scalar,
-    ValueError for a list), so a caller cannot reliably catch-and-deny either."""
-    for bad in (42, None, ["ALLOW"]):
-        try:
-            KERNEL.decide(ACTION, evaluators=[lambda action, b=bad: b])
-        except (TypeError, ValueError):
-            continue
-        raise AssertionError(f"expected the kernel to raise on evaluator output {bad!r}")
+# --- WAS FINDING F2: fail-closed now holds AT the kernel boundary ------------
+# Both of these were example tests pinning a crash. They are now property tests:
+# Hypothesis searches the malformed-return space instead of the three values we
+# happened to think of.
+malformed_returns = st.one_of(
+    st.integers(),
+    st.none(),
+    st.floats(allow_nan=True, allow_infinity=True),
+    st.booleans(),
+    st.lists(st.text(max_size=4), max_size=3),
+    st.tuples(st.text(max_size=4)),
+    st.sets(st.text(max_size=4), max_size=3),
+)
 
 
-def test_FINDING_kernel_raises_on_an_unhashable_verdict() -> None:
-    """FINDING F2, continued. `_rank` looks the verdict up in a dict, so a verdict
-    that is unhashable raises TypeError inside the composer itself rather than
-    ranking as DENY. The fail-closed rule is written as "unknown → DENY"; unknown
-    here means "not a key", and an unhashable value is not even askable."""
-    try:
-        KERNEL.decide(ACTION, evaluators=[lambda action: {"verdict": ["ALLOW"]}])
-    except TypeError:
-        return
-    raise AssertionError("expected TypeError from an unhashable verdict")
+@settings(deadline=None)
+@given(bad=malformed_returns)
+def test_a_non_mapping_evaluator_return_denies_instead_of_raising(bad: Any) -> None:
+    """WAS FINDING F2 — now the strengthened property.
+
+    COMPOSITION.md Invariant 4 says an evaluator that "errors, times out, or returns
+    an unknown verdict is composed as DENY". That held for the wrappers in
+    `evaluators.py`, which catch — but `Kernel.decide` called a raw evaluator
+    unguarded, so a plugin returning a non-str, non-mapping value made the kernel
+    RAISE. No token was minted (the exception escaped before the mint), so it was a
+    DoS rather than an escalation — but the kernel did not itself satisfy Invariant
+    4, and the exception TYPE was not even stable (TypeError for a scalar,
+    ValueError for a list), so a caller could not reliably catch-and-deny.
+
+    `as_decision` now recognises a non-dict non-str return and composes it as DENY
+    with an explanatory reason. The kernel boundary itself is fail-closed, for every
+    malformed shape Hypothesis can build — no exception, no token."""
+    out = KERNEL.decide(ACTION, evaluators=[lambda action, b=bad: b])
+    assert out["decision"]["verdict"] == DENY
+    assert out["token"] is None
+    assert "token_id" not in out["decision"]
+    assert "malformed evaluator output" in out["decision"]["reason"]
+
+
+@settings(deadline=None)
+@given(verdict=st.one_of(st.lists(st.text(max_size=4), max_size=3), st.dictionaries(
+    st.text(max_size=2), st.text(max_size=2), max_size=2)))
+def test_an_unhashable_verdict_denies_instead_of_raising(verdict: Any) -> None:
+    """WAS FINDING F2, continued — now the strengthened property.
+
+    `_rank` looks the verdict up in a dict, so an UNHASHABLE verdict used to raise
+    TypeError inside the composer itself rather than ranking as DENY. The
+    fail-closed rule reads "unknown -> DENY"; unknown meant "not a key", and an
+    unhashable value is not even askable.
+
+    `as_decision` now type-checks before ranking (`normalize(v) if isinstance(v,
+    str) else DENY`), so a non-string verdict of any kind — hashable or not —
+    composes as DENY without touching the rank table."""
+    out = KERNEL.decide(ACTION, evaluators=[lambda action, v=verdict: {"verdict": v}])
+    assert out["decision"]["verdict"] == DENY
+    assert out["token"] is None
+    assert "token_id" not in out["decision"]
 
 
 # --- sanity: the generated space really does exercise the whole lattice -----

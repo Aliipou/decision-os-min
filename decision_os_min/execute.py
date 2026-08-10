@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .compose import CONTAIN, DEFER, DENY, LIMIT
+from .compose import CONTAIN, LIMIT, PERMITTING
 from .kernel import action_fingerprint, verify
 from .spentstore import FileSpentStore, SpentStore, SpentStoreUnavailable
 
@@ -163,7 +163,12 @@ class Executor:
             )
 
         verdict = decision["verdict"]
-        if verdict in (DENY, DEFER) or not decision.get("token_id"):
+        # R2: gate on the PERMITTING WHITELIST, not on a blacklist of two verdicts.
+        # The old test was `verdict in (DENY, DEFER) or not token_id`, which let any
+        # verdict outside that pair through as long as a `token_id` was present —
+        # and a plugin could inject one. Lowercase `"deny"` (a neighbouring engine's
+        # dialect) was neither DENY nor DEFER, so a refusal executed.
+        if verdict not in PERMITTING or not decision.get("token_id"):
             raise ExecutionRefused(f"verdict {verdict}: no execution")
 
         # Token semantics enforced from the SIGNED decision fields: expiry + a
@@ -193,7 +198,23 @@ class Executor:
         fn = tools.get(tool_name)
         if fn is None:
             raise ExecutionRefused(f"no executor registered for tool '{tool_name}'")
-        payload = decision.get("transformed_payload") if verdict == LIMIT else action.get("payload")
+        if verdict == LIMIT and "transformed_payload" not in decision:
+            # An obligation the PEP cannot discharge must REFUSE, not degrade. A
+            # LIMIT means "run, but minimized"; with no minimized payload attached
+            # the old code fell back to `{}` and called the tool with no arguments
+            # — a DIFFERENT effect, not a more restrictive one. This is reachable
+            # now that evaluator obligations are stripped (COMPOSITION.md §11), so
+            # an evaluator's LIMIT collapses to a clean veto, which is exactly what
+            # a veto-only plugin is allowed to be.
+            raise ExecutionRefused("LIMIT without a transformed_payload: refusing")
+        # Apply the minimized payload whenever the signed decision carries one — not
+        # only when the verdict happens to be LIMIT. Gating on the verdict meant a
+        # CONTAIN decision discarded a redaction the kernel had already computed.
+        payload = (
+            decision["transformed_payload"]
+            if "transformed_payload" in decision
+            else action.get("payload")
+        )
         payload = payload or {}
         self._last_payload_digest = _payload_digest(payload)
         return fn(payload)
