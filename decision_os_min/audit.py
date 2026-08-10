@@ -30,7 +30,9 @@ GENESIS = "0" * 64
 
 def _hash(entry: dict[str, Any]) -> str:
     payload = {k: v for k, v in entry.items() if k != "entry_hash"}
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=str
+    ).encode()
     return hashlib.sha256(canonical).hexdigest()
 
 

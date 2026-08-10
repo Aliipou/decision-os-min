@@ -52,8 +52,14 @@ def _rank(verdict: str) -> int:
     return _RANK.get(verdict, _RANK[DENY])
 
 
+# The canonical lattice member for each verdict VALUE. `normalize` returns one of
+# these objects, never the caller's, so no downstream `in PERMITTING` test can be
+# answered by an attacker-controlled `__hash__`/`__eq__`.
+_CANONICAL = {v: v for v in _RANK}
+
+
 def normalize(verdict: str) -> str:
-    """Map anything outside the lattice onto ``DENY``.
+    """Map anything outside the lattice onto ``DENY``, and canonicalize what is in it.
 
     R2 fix. Previously an unknown verdict *ranked* as DENY but was *returned
     verbatim*, with two consequences: (a) ``meet`` was not commutative off-lattice
@@ -61,8 +67,24 @@ def normalize(verdict: str) -> str:
     order-independence the whole design rests on; and (b) a consumer testing
     ``verdict == DENY`` — rather than ``verdict not in PERMITTING`` — read an
     off-lattice string as "not a denial". Normalizing at the boundary means the
-    composed verdict is ALWAYS a member of ``VERDICTS``."""
-    return verdict if verdict in _RANK else DENY
+    composed verdict is ALWAYS a member of ``VERDICTS``.
+
+    ROUND-2 FIX — the first version of this returned the CALLER'S OBJECT when it
+    tested `in _RANK`, and `in` is a hash/eq lookup. A `str` subclass could
+    therefore make its VALUE and its IDENTITY disagree: value `"DENY"` (so
+    `more_restrictive` ranked it most-restrictive and let it govern the fold) while
+    `__hash__`/`__eq__` impersonated `"ALLOW"` (so the kernel's mint gate and the
+    PEP's `verdict in PERMITTING` test both said yes). A semantic veto minted a
+    token and executed — with a signature that verified, because `json.dumps`
+    serializes a subclass by value.
+
+    Two defences, both needed. The lookup key comes from `str.__str__`, the BASE
+    implementation, so a `__str__` override cannot lie about the underlying
+    characters. And the return value is the interned `_CANONICAL` member, never the
+    caller's object, so an attacker-controlled `__hash__`/`__eq__` cannot reach any
+    downstream membership test."""
+    key = str.__str__(verdict) if isinstance(verdict, str) else DENY
+    return _CANONICAL.get(key, DENY)
 
 
 def meet(a: str, b: str) -> str:
@@ -132,12 +154,24 @@ def sanitize(d: dict[str, Any]) -> dict[str, Any]:
     (a redaction, a sandbox spec). That is deliberate — obligations do not yet
     compose (COMPOSITION.md §7, and the design in OBLIGATIONS.md). Silently
     honouring an unverified obligation is worse than refusing to carry one."""
-    return {k: v for k, v in d.items() if k in EVALUATOR_CONTRIBUTABLE}
+    out = {k: v for k, v in d.items() if k in EVALUATOR_CONTRIBUTABLE}
+    # Coerce `reason` to a plain str. It is the one free-text field an evaluator
+    # still owns, and it flows into BOTH the signed decision and the audit log —
+    # which serialize with different tolerances (`_canonical` passes
+    # `default=str`, the audit log did not). A `reason` that signs but does not
+    # log let an effect run and then blew up the mandatory audit write.
+    if "reason" in out:
+        out["reason"] = str.__str__(out["reason"]) if isinstance(out["reason"], str) else str(
+            out["reason"]
+        )
+    return out
 
 
 def more_restrictive(d1: dict[str, Any], d2: dict[str, Any]) -> dict[str, Any]:
     """Return whichever decision dict carries the more-restrictive verdict; ties
     keep ``d1`` (so the authority verdict and its obligations win a tie)."""
-    r1 = _rank(normalize(str(d1.get("verdict", DENY))))
-    r2 = _rank(normalize(str(d2.get("verdict", DENY))))
+    # normalize() canonicalizes by value, so no `str()` call is needed here — and
+    # `str()` would be actively wrong, since a `__str__` override can lie.
+    r1 = _rank(normalize(d1.get("verdict", DENY)))
+    r2 = _rank(normalize(d2.get("verdict", DENY)))
     return d2 if r2 > r1 else d1

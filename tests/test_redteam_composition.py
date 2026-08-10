@@ -870,22 +870,22 @@ def test_fixed4d_mutation_from_inside_a_blessed_legitimacy_policy_is_inert(tmp_p
     assert sink == [("send_email", {"to": "x@ok.test"})]
 
 
-def test_finding_R2_normalize_is_bypassable_by_a_lying_str_subclass(tmp_path):
-    """NEW FINDING, found while inverting these tests. Scope limit on R2, pinned so
-    the strengthened claim is not read as more than it is.
+def test_fixed_R2_normalize_canonicalizes_a_lying_str_subclass(tmp_path):
+    """CLOSED, and this one was worth taking seriously. When first pinned it looked
+    harmless: `normalize` decided lattice membership with `verdict in _RANK` — a
+    hash lookup — so a `str` SUBCLASS whose `__eq__`/`__hash__` collide with a real
+    member passed and was returned VERBATIM. The liar below ranks as DENY, so
+    nothing executed, and it was filed as a scope limit rather than a break.
 
-    `normalize` decides lattice membership with `verdict in _RANK` — a hash lookup.
-    A `str` SUBCLASS whose `__eq__`/`__hash__` collide with a real lattice member
-    passes that test and is returned VERBATIM, so the two properties R2 buys are
-    both false for it: the composed verdict escapes `VERDICTS`, and `meet` is once
-    again non-commutative at the string level.
+    A later adversarial round showed that was too generous. The SAME defect with a
+    sharper construction — value "DENY" (so it governs the fold) but `__hash__`/
+    `__eq__` impersonating "ALLOW" (so `verdict in PERMITTING` says yes) — turned a
+    semantic veto into a token-minting execution. "Fail-closed for the variant I
+    happened to write" is not fail-closed.
 
-    It is NOT an escalation, which is why it is a finding and not a break: the liar
-    below ranks as DENY, so it is outside PERMITTING, no token is minted and nothing
-    executes. The reachable damage is the same misreading R2 set out to prevent — a
-    downstream consumer testing `verdict == DENY` sees a refusal it does not
-    recognise. The real fix is a type check (`type(verdict) is str`) or an explicit
-    membership test against `VERDICTS`, not a hash lookup."""
+    Closed by canonicalizing: the lookup key comes from `str.__str__` (which a
+    `__str__` override cannot lie about) and the return value is the interned
+    lattice member, so the caller's object never reaches a membership test."""
 
     class LiarDeny(str):
         def __eq__(self, other):
@@ -896,10 +896,12 @@ def test_finding_R2_normalize_is_bypassable_by_a_lying_str_subclass(tmp_path):
 
     liar = LiarDeny("GOTCHA-not-a-verdict")
 
-    # R2's guarantee does not hold for it:
-    assert str(compose([liar])) == "GOTCHA-not-a-verdict"
-    assert str(compose([liar])) not in VERDICTS
-    assert str(meet(liar, DENY)) != str(meet(DENY, liar))  # commutativity fails again
+    # R2's guarantee now holds for it: the composed verdict is a canonical member,
+    # and commutativity is restored at the string level.
+    assert compose([liar]) == DENY
+    assert type(compose([liar])) is str  # the caller's object did not survive
+    assert compose([liar]) in VERDICTS
+    assert meet(liar, DENY) == meet(DENY, liar) == DENY
 
     # ...but it is still fail-closed end to end: no token, no execution.
     sink = []
