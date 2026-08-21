@@ -1,5 +1,7 @@
 # decision-os-min
 
+**Live (graph):** [https://ali-decision-os-min.vercel.app](https://ali-decision-os-min.vercel.app)
+
 **A minimal reference implementation of the Decision OS: it preserves the core
 security invariants in a single package, collapsing the multi-repo architecture
 into one `handle()` call.**
