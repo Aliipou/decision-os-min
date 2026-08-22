@@ -35,7 +35,8 @@ mandatory interceptor), not more library axioms.
 | Confused deputy | PASS |
 | Stale FDK / strip binding | PASS |
 | Shared spent-store replica | PASS |
-| Private `_bodies` / ambient unsealed callable | FAIL (architectural — in-process introspection / never-sealed IO) |
+| Private `_bodies` direct call | PASS — `_BodyCell` non-callable |
+| `object.__getattribute__(cell, '_fn')` / ambient unsealed callable | FAIL (architectural — in-process introspection / never-sealed IO) |
 
 ## One question
 

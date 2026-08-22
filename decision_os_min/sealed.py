@@ -63,6 +63,30 @@ def poison(name: str) -> Callable[..., Any]:
     return _dead
 
 
+class _BodyCell:
+    """Non-callable holder for a sealed tool body.
+
+    Closes ``rt._bodies[name](**kwargs)``. Residual: in-process
+    ``object.__getattribute__(cell, '_fn')`` still reaches the callable — that is
+    ambient Python introspection, not the sealed public surface.
+    """
+
+    __slots__ = ("_fn", "_fn_id", "_name")
+
+    def __init__(self, fn: Callable[..., Any], name: str) -> None:
+        object.__setattr__(self, "_fn", fn)
+        object.__setattr__(self, "_fn_id", id(fn))
+        object.__setattr__(self, "_name", name)
+
+    def __call__(self, *_a: Any, **_k: Any) -> Any:
+        raise SealedBreach(
+            f"body cell {self._name!r} is not callable; use SealedRuntime.invoke()"
+        )
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        raise SealedBreach("body cell is immutable")
+
+
 @dataclass(frozen=True)
 class AdmissionTicket:
     actor: str
@@ -248,7 +272,7 @@ class SealedRuntime:
         self._source_registry = tools
         exports: dict[str, Callable[..., Any]] = {}
         for name, fn in list(tools.items()):
-            self._bodies[name] = fn
+            self._bodies[name] = _BodyCell(fn, name)
             self._tool_ids[name] = id(fn)
             # _tools never holds a live effect — closes rt._tools[name](...) bypass.
             self._tools[name] = poison(name)
@@ -269,14 +293,17 @@ class SealedRuntime:
     def _assert_registry_integrity(self, tool: str) -> Callable[..., Any]:
         if tool not in self._bodies:
             raise SealedBreach(f"tool {tool!r} not in sealed registry")
-        body = self._bodies[tool]
-        if id(body) != self._tool_ids.get(tool):
+        cell = self._bodies[tool]
+        if not isinstance(cell, _BodyCell):
+            raise SealedBreach("registry mutation detected; body cell replaced")
+        body = object.__getattribute__(cell, "_fn")
+        body_id = object.__getattribute__(cell, "_fn_id")
+        if id(body) != self._tool_ids.get(tool) or id(body) != body_id:
             raise SealedBreach("registry mutation detected; execution refused")
         if self._source_registry is not None:
             src = self._source_registry.get(tool)
             if src is not None and not getattr(src, "__name__", "").startswith("poisoned_"):
                 raise SealedBreach("source registry un-poisoned; execution refused")
-        # Stored _tools entry must remain poisoned.
         slot = self._tools.get(tool)
         if slot is None or not getattr(slot, "__name__", "").startswith("poisoned_"):
             raise SealedBreach("_tools slot is not poisoned; execution refused")

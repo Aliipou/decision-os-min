@@ -257,7 +257,7 @@ def test_d3b_bodies_mutation_detected(runtime):
         effects["deploy_ranking"].append("body-mut")
         return "body-mut"
 
-    rt._bodies["deploy_ranking"] = evil  # noqa: SLF001
+    rt._bodies["deploy_ranking"] = evil  # noqa: SLF001 — replace cell with callable
     t = rt.admit("owner-1")
     with pytest.raises((SealedBreach, SealedRefused)):
         rt.invoke(
@@ -277,6 +277,26 @@ def test_d3c_direct_tools_call_cannot_execute(runtime):
     with pytest.raises(SealedBreach):
         rt._tools["deploy_ranking"]({"model": "x"})  # noqa: SLF001
     assert effects["deploy_ranking"] == []
+
+
+def test_d3d_direct_bodies_call_cannot_execute(runtime):
+    """rt._bodies[name](**kwargs) must not run — cell is non-callable."""
+    rt, _tools, _ex, effects = runtime
+    with pytest.raises(SealedBreach):
+        rt._bodies["deploy_ranking"](model="bypass")  # noqa: SLF001
+    assert effects["deploy_ranking"] == []
+
+
+def test_d3e_stronger_getattribute_body_still_architectural(runtime):
+    """Residual: object.__getattribute__(cell, '_fn') reaches the callable.
+
+    Documented architectural FAIL for in-process introspection — not sealed surface.
+    """
+    rt, _tools, _ex, effects = runtime
+    cell = rt._bodies["deploy_ranking"]  # noqa: SLF001
+    raw = object.__getattribute__(cell, "_fn")
+    assert raw(model="via-getattr") == "via-getattr"
+    assert effects["deploy_ranking"] == ["via-getattr"]
 
 
 def test_d4_actor_spoof_via_set_actor_irrelevant(runtime):
