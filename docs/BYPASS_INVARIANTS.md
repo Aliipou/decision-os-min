@@ -24,8 +24,9 @@ mandatory interceptor), not more library axioms.
 | Attack Class | Final Status |
 |---|---|
 | Raw reference (poisoned source) | PASS |
+| Direct `_tools[name](...)` | PASS — `_tools` holds only poison; live body only via invoke→PEP closure |
 | Export / `__wrapped__` | PASS |
-| Registry mutation | PASS |
+| Registry mutation (`_tools` / `_bodies`) | PASS |
 | Actor spoofing (`set_actor`) | PASS (tickets required) |
 | Ticket forgery / replay / substitution | PASS |
 | Capability substitution | PASS |
@@ -33,7 +34,7 @@ mandatory interceptor), not more library axioms.
 | Confused deputy | PASS |
 | Stale FDK / strip binding | PASS |
 | Shared spent-store replica | PASS |
-| Ambient unsealed callable | FAIL (architectural) |
+| Private `_bodies` / ambient unsealed callable | FAIL (architectural — in-process introspection / never-sealed IO) |
 
 ## One question
 

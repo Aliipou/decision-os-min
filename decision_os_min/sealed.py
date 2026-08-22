@@ -200,7 +200,10 @@ class SealedRuntime:
     executor: Executor = field(init=False)
     admission: AdmissionOffice = field(init=False)
     evidence: list[EvidenceRecord] = field(default_factory=list)
-    _tools: dict[str, Callable[[dict[str, Any]], Any]] = field(default_factory=dict)
+    # Public-facing table: always poisoned / inert callables (never live effects).
+    _tools: dict[str, Callable[..., Any]] = field(default_factory=dict)
+    # Private bodies — only wrapped as a fresh closure inside invoke() for PEP.
+    _bodies: dict[str, Callable[..., Any]] = field(default_factory=dict)
     _tool_ids: dict[str, int] = field(default_factory=dict)
     _agent_meta: dict[str, dict[str, str]] = field(default_factory=dict)
     _frozen: bool = False
@@ -230,13 +233,10 @@ class SealedRuntime:
         self._source_registry = tools
         exports: dict[str, Callable[..., Any]] = {}
         for name, fn in list(tools.items()):
-            body = fn
-
-            def _effect(payload: dict[str, Any], _body: Callable[..., Any] = body) -> Any:
-                return _body(**payload)
-
-            self._tools[name] = _effect
-            self._tool_ids[name] = id(_effect)
+            self._bodies[name] = fn
+            self._tool_ids[name] = id(fn)
+            # _tools never holds a live effect — closes rt._tools[name](...) bypass.
+            self._tools[name] = poison(name)
             tools[name] = poison(name)
 
             def _make_export(n: str) -> Callable[..., Any]:
@@ -251,18 +251,29 @@ class SealedRuntime:
         self._frozen = True
         return exports
 
-    def _assert_registry_integrity(self, tool: str) -> Callable[[dict[str, Any]], Any]:
-        if tool not in self._tools:
+    def _assert_registry_integrity(self, tool: str) -> Callable[..., Any]:
+        if tool not in self._bodies:
             raise SealedBreach(f"tool {tool!r} not in sealed registry")
-        fn = self._tools[tool]
-        if id(fn) != self._tool_ids.get(tool):
+        body = self._bodies[tool]
+        if id(body) != self._tool_ids.get(tool):
             raise SealedBreach("registry mutation detected; execution refused")
         if self._source_registry is not None:
             src = self._source_registry.get(tool)
             if src is not None and not getattr(src, "__name__", "").startswith("poisoned_"):
-                # Source dict entry must remain poisoned.
                 raise SealedBreach("source registry un-poisoned; execution refused")
-        return fn
+        # Stored _tools entry must remain poisoned.
+        slot = self._tools.get(tool)
+        if slot is None or not getattr(slot, "__name__", "").startswith("poisoned_"):
+            raise SealedBreach("_tools slot is not poisoned; execution refused")
+        return body
+
+    def _pep_closure(self, tool: str, body: Callable[..., Any]) -> Callable[[dict[str, Any]], Any]:
+        """One-shot wrapper handed only to Executor for this invoke()."""
+
+        def effect(payload: dict[str, Any], _body: Callable[..., Any] = body) -> Any:
+            return _body(**payload)
+
+        return effect
 
     def invoke(
         self,
@@ -284,8 +295,9 @@ class SealedRuntime:
         if meta.get("stakeholder") and meta["stakeholder"] != stakeholder:
             raise AdmissionError("ticket stakeholder substitution refused")
 
-        effect = self._assert_registry_integrity(tool)
-        # data_labels must be purpose-binding keys (authority), not stakeholder names.
+        effect_body = self._assert_registry_integrity(tool)
+        pep_tool = self._pep_closure(tool, effect_body)
+        cap = capability or f"tool:{tool}"
         purpose = intent
         if purpose in ("deploy", "price", "regulate"):
             labels = ["ops"]
@@ -340,7 +352,7 @@ class SealedRuntime:
             raise SealedRefused(DENY, "decision signature invalid", {})
 
         try:
-            output = self.executor.execute(action, result, {tool: effect})
+            output = self.executor.execute(action, result, {tool: pep_tool})
         except ExecutionRefused as exc:
             rec = self._emit(
                 action, agent_id, intent, resource, auth_preview, decision, result, False, None, f"PEP:{exc}"

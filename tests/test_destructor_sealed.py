@@ -236,7 +236,7 @@ def test_d3_registry_mutation_of_internal_table(runtime):
         effects["deploy_ranking"].append("mutated")
         return "mutated"
 
-    rt._tools["deploy_ranking"] = evil  # noqa: SLF001 — adversarial
+    rt._tools["deploy_ranking"] = evil  # noqa: SLF001 — un-poison slot
     t = rt.admit("owner-1")
     with pytest.raises((SealedBreach, SealedRefused)):
         rt.invoke(
@@ -248,6 +248,35 @@ def test_d3_registry_mutation_of_internal_table(runtime):
             resource="ranking_model",
         )
     assert "mutated" not in effects["deploy_ranking"]
+
+
+def test_d3b_bodies_mutation_detected(runtime):
+    rt, _tools, _ex, effects = runtime
+
+    def evil(*, model: str, **_k):
+        effects["deploy_ranking"].append("body-mut")
+        return "body-mut"
+
+    rt._bodies["deploy_ranking"] = evil  # noqa: SLF001
+    t = rt.admit("owner-1")
+    with pytest.raises((SealedBreach, SealedRefused)):
+        rt.invoke(
+            ticket=t,
+            agent_id="owner-1",
+            tool="deploy_ranking",
+            payload={"model": "v1"},
+            intent="deploy",
+            resource="ranking_model",
+        )
+    assert "body-mut" not in effects["deploy_ranking"]
+
+
+def test_d3c_direct_tools_call_cannot_execute(runtime):
+    """Hostile finding: rt._tools[name](payload) must not run the effect."""
+    rt, _tools, _ex, effects = runtime
+    with pytest.raises(SealedBreach):
+        rt._tools["deploy_ranking"]({"model": "x"})  # noqa: SLF001
+    assert effects["deploy_ranking"] == []
 
 
 def test_d4_actor_spoof_via_set_actor_irrelevant(runtime):
@@ -379,11 +408,16 @@ def test_d7_decision_token_replay(runtime):
         "nonce": "replay-1",
     }
     result = rt.kernel.decide(action, evaluators=[rt._leg_eval])
-    fn = rt._tools["audit_export"]
+    ran: list = []
+
+    def fn(p):
+        ran.append(p)
+        return "audit:public"
+
     assert rt.executor.execute(action, result, {"audit_export": fn}) == "audit:public"
     with pytest.raises(ExecutionRefused):
         rt.executor.execute(action, result, {"audit_export": fn})
-
+    assert ran == [{"scope": "public"}]
 
 def test_d8_confused_deputy_operator_as_owner_payload(runtime):
     rt, _, _, effects = runtime
@@ -437,10 +471,11 @@ def test_d10_stale_fdk_verdict_on_new_action(runtime):
     b = dict(a)
     b["payload"] = {"model": "evil", "dark_pattern": True}
     b["nonce"] = "stale-a"
+    ran: list = []
     with pytest.raises(ExecutionRefused):
-        rt.executor.execute(b, result, {"deploy_ranking": rt._tools["deploy_ranking"]})
+        rt.executor.execute(b, result, {"deploy_ranking": lambda p: ran.append(p) or "x"})
+    assert ran == []
     assert effects["deploy_ranking"] == []
-
 
 def test_d11_strip_legitimacy_binding_breaks_signature(runtime):
     rt, _, _, effects = runtime
@@ -462,9 +497,8 @@ def test_d11_strip_legitimacy_binding_breaks_signature(runtime):
     tampered = copy.deepcopy(result)
     tampered["decision"]["legitimacy_binding"] = "0" * 64
     with pytest.raises(ExecutionRefused):
-        rt.executor.execute(a, tampered, {"audit_export": rt._tools["audit_export"]})
+        rt.executor.execute(a, tampered, {"audit_export": lambda p: effects["audit_export"].append(p) or "x"})
     assert effects["audit_export"] == []
-
 
 def test_d12_replica_shared_spent_blocks_double_spend(tmp_path, monkeypatch):
     from decision_os_min.execute import ExecutionRefused, Executor
@@ -505,9 +539,9 @@ def test_d12_replica_shared_spent_blocks_double_spend(tmp_path, monkeypatch):
     pub = rt.kernel.public_key_hex()
     ex1 = Executor(pub, HashLog(tmp_path / "e1.jsonl"), spent_store=store)
     ex2 = Executor(pub, HashLog(tmp_path / "e2.jsonl"), spent_store=store)
-    assert ex1.execute(action, result, {"audit_export": rt._tools["audit_export"]})
+    assert ex1.execute(action, result, {"audit_export": lambda p: f"audit:{p.get('scope')}"})
     with pytest.raises(ExecutionRefused):
-        ex2.execute(action, result, {"audit_export": rt._tools["audit_export"]})
+        ex2.execute(action, result, {"audit_export": lambda p: f"audit:{p.get('scope')}"})
 
 
 def test_d13_second_seal_refused(runtime):
