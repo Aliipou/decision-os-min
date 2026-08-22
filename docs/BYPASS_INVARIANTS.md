@@ -25,6 +25,8 @@ mandatory interceptor), not more library axioms.
 |---|---|
 | Raw reference (poisoned source) | PASS |
 | Direct `_tools[name](...)` | PASS — `_tools` holds only poison; live body only via invoke→PEP closure |
+| Unarmed `executor.execute` | PASS — arm required by invoke |
+| Public `kernel.decide` | PASS — facade closed |
 | Export / `__wrapped__` | PASS |
 | Registry mutation (`_tools` / `_bodies`) | PASS |
 | Actor spoofing (`set_actor`) | PASS (tickets required) |
