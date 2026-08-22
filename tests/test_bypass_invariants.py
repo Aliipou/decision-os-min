@@ -250,8 +250,8 @@ def test_bi7b_execute_without_token_impossible_on_deny(tmp_path):
 def test_bi8_shared_spent_store_blocks_cross_executor_replay(tmp_path):
     store = InMemorySpentStore()
     dos = _dos(tmp_path)
-    from decision_os_min.execute import Executor
     from decision_os_min.audit import HashLog
+    from decision_os_min.execute import Executor
 
     pub = dos.kernel.public_key_hex()
     ex1 = Executor(pub, HashLog(tmp_path / "a1.jsonl"), spent_store=store)
@@ -271,8 +271,8 @@ def test_bi8b_divergent_spent_stores_allow_double_spend(tmp_path):
     unless operators share spent-store / use a single PEP front door.
     """
     dos = _dos(tmp_path)
-    from decision_os_min.execute import Executor
     from decision_os_min.audit import HashLog
+    from decision_os_min.execute import Executor
 
     pub = dos.kernel.public_key_hex()
     ex1 = Executor(pub, HashLog(tmp_path / "d1.jsonl"), spent_store=InMemorySpentStore())

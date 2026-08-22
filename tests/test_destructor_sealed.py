@@ -7,7 +7,6 @@ Every test tries to produce a side effect. PASS means the effect did NOT run
 from __future__ import annotations
 
 import copy
-from pathlib import Path
 
 import pytest
 
@@ -585,8 +584,8 @@ def test_d11_strip_legitimacy_binding_breaks_signature(runtime):
     assert effects["audit_export"] == []
 
 def test_d12_replica_shared_spent_blocks_double_spend(tmp_path, monkeypatch):
-    from decision_os_min.execute import ExecutionRefused, Executor
     from decision_os_min.audit import HashLog
+    from decision_os_min.execute import ExecutionRefused, Executor
     from decision_os_min.spentstore import InMemorySpentStore
 
     store = InMemorySpentStore()

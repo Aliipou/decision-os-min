@@ -52,18 +52,27 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    environment:
-      name: production-smoke
-      url: https://github.com/${{ github.repository }}/deployments/production-smoke
     steps:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t decision-os-min:ci .
       - name: Smoke-test the container
         run: |
+          set -euo pipefail
           docker run -d --name dos -p 8080:8080 decision-os-min:ci
-          for i in $(seq 1 20); do
-            curl -sf http://localhost:8080/healthz && break || sleep 1
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/healthz; then
+              ok=1
+              break
+            fi
+            sleep 1
           done
-          curl -sf http://localhost:8080/healthz
+          if [ "$ok" != 1 ]; then
+            echo "=== docker logs ==="
+            docker logs dos || true
+            docker rm -f dos || true
+            exit 1
+          fi
+          curl -sf http://127.0.0.1:8080/readyz | tee /tmp/readyz.json
           docker rm -f dos

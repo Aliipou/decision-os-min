@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from decision_os_min.host import AgentClient, AgentHost, Intent, spawn_host
+from decision_os_min.host import AgentHost, Intent, spawn_host
 from decision_os_min.spentstore import InMemorySpentStore
 
 POLICY = {
@@ -95,11 +95,7 @@ def test_h2_spawned_host_ipc_success_and_deny(tmp_path, monkeypatch):
 
 
 def test_h3_untrusted_agent_has_no_tool_handles_and_probes_os(tmp_path):
-    """Agent process: no tool adapters; ambient OS may still work without sandbox.
-
-    Documents the claim split: hosted effects require IPC; OS ambient is PARTIAL
-    until seccomp/container is applied.
-    """
+    """TM-H: no adapters. Ambient OS success here is expected WITHOUT sandbox (not TM-A)."""
     probe = Path(__file__).resolve().parents[1] / "decision_os_min" / "_untrusted_agent_probe.py"
     env = os.environ.copy()
     env["AGENT_PROBE_DIR"] = str(tmp_path)
@@ -113,11 +109,8 @@ def test_h3_untrusted_agent_has_no_tool_handles_and_probes_os(tmp_path):
     assert r.returncode == 0, r.stderr
     report = json.loads(r.stdout.strip().splitlines()[-1])
     assert report["has_deploy_ranking"] is False
-    # Without OS sandbox, filesystem write from agent often succeeds — PARTIAL.
     assert "filesystem" in report["direct_effects"]
-    fs = report["direct_effects"]["filesystem"]
-    # Record honesty: either WROTE (needs OS jail) or BLOCKED.
-    assert fs.startswith("WROTE") or fs.startswith("BLOCKED")
+    # TM-A is enforced in test_os_isolation.py under Docker — not here.
 
 
 def test_h4_agent_cannot_import_live_host_adapters_across_ipc():

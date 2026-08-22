@@ -14,6 +14,7 @@ from decision_os_min.service import create_app  # noqa: E402
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DECISION_OS_AUDIT", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("DECISION_OS_EXPOSE_AUDIT", "1")
     return TestClient(create_app())
 
 
@@ -27,8 +28,10 @@ def _action(**kw):
     return base
 
 
-def test_health_and_pubkey(client):
+def test_health_ready_and_pubkey(client):
     assert client.get("/healthz").json() == {"status": "ok"}
+    ready = client.get("/readyz").json()
+    assert ready["status"] == "ready"
     assert len(client.get("/v1/pubkey").json()["kernel_public_key"]) == 64
 
 

@@ -4,7 +4,8 @@ FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PORT=8080 \
-    DECISION_OS_AUDIT=/data/audit.jsonl
+    DECISION_OS_AUDIT=/data/audit.jsonl \
+    DECISION_OS_KEY_FILE=/data/kernel_ed25519.pem
 
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
@@ -19,7 +20,8 @@ USER appuser
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz').status==200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/readyz').status==200 else 1)"
 
 # Mount a policy at /config/policy.json and set DECISION_OS_POLICY to use it.
+# Persist /data so DECISION_OS_KEY_FILE and the audit chain survive restarts.
 CMD ["decision-os-serve"]
