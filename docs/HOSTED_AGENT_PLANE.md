@@ -40,7 +40,8 @@ The agent no longer owns the execution path for host-registered effects.
 | Host-registered effect ⇒ chain | **TM-H** | **PASS** | `tests/test_hosted_agent_plane.py` |
 | Agent has no tool/adapter handles | **TM-H** | **PASS** | h3/h4 |
 | IPC-only path to host effects | **TM-H** | **PASS** | h2/h4 |
-| DirectEffect(Agent)=∅ (FS/net/exec) | **TM-A** | **Linux/Docker suite** — local without Docker = skip | `sandbox/`, `tests/test_os_isolation.py` |
+| DirectEffect(Agent)=∅ (FS/net) | **TM-A** | **PASS** under `agent-noambient-v1` Docker | `tests/test_os_isolation.py` |
+| DirectEffect subprocess/exec | **TM-A** | **RESIDUAL** — often `RAN` | same probe; next: gVisor/nested jail |
 
 See [`THREAT_MODELS.md`](THREAT_MODELS.md). Do not mix TM-H PASS with TM-A.
 

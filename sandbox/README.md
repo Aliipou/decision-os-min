@@ -4,24 +4,23 @@
 
 Under Docker flags + seccomp profile in this directory, the untrusted agent MUST NOT:
 
-| Probe | Expected |
+| Probe | Expected (v1) |
 |---|---|
-| Write outside allowed tmp (and preferably any durable write) | BLOCKED |
-| `socket.connect` / outbound network | BLOCKED |
-| Spawn subprocess / `exec` | BLOCKED |
-| See product credentials in env | absent |
-| Hold host effect adapters | absent |
+| Durable filesystem write (`AGENT_PROBE_PATH`) | BLOCKED (`--read-only`) |
+| Outbound `socket.connect` | BLOCKED (`--network=none` + seccomp) |
+| Product credentials in env | ABSENT |
+| Host effect adapters | ABSENT (not mounted) |
 
-IPC to Host (stdin/stdout or mounted socket) remains allowed **from the test harness
-perspective** by running Host *outside* the agent container.
+| Probe | Residual (not a v1 PASS gate) |
+|---|---|
+| `subprocess` / `execve` of image binaries | Often still **RAN** — blocking `execve` in seccomp also blocks container start |
 
 ## Non-guarantees
 
 - Kernel exploits / container breakout
 - Compromised Host
-- Windows native isolation (this profile is **Linux/Docker**; Windows = PARTIAL)
-- Perfect denial of all syscalls not listed (profile is minimal, not a full Chrome sandbox)
-
+- Windows native isolation without Docker (local Windows = Docker Desktop or skip)
+- Full denial of `exec` inside the image (needs stronger runtime: gVisor / nested jail — next harden)
 ## How to run
 
 ```bash

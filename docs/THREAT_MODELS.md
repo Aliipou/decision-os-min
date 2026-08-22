@@ -49,8 +49,9 @@ host adapters.
 **Out of scope:** compromising the Host or the OS kernel (TM-K).
 
 **Evidence today:**
-- Without sandbox: FAIL/PARTIAL — ambient probes succeed (`tm_a_probe.py` control, `test_h3`).
-- With `agent-noambient-v1` (Linux/Docker CI job `tm-a-isolation`): suite must PASS or claim stays PARTIAL.
+- Without sandbox: FAIL — ambient probes succeed (`tm_a_probe.py` control).
+- With `agent-noambient-v1` (Docker): **FS write + network** MUST be BLOCKED; credentials ABSENT.
+- **Residual gap (real):** `subprocess`/`execve` of image binaries often still **RAN** — blocking `execve` in seccomp also prevents container start. Not a v1 PASS gate; next harden (gVisor / nested jail), not more Python sealing.
 
 **Claim language (only after suite PASS on declared platform):**
 
