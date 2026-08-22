@@ -1,0 +1,16 @@
+{
+  "grants": {
+    "agent:bot": ["tool:send_email"]
+  },
+  "purpose_bindings": {
+    "customer_support": ["support_reply"]
+  },
+  "redactions": [
+    {
+      "action_purpose": "support_reply",
+      "redact_fields": ["ssn"]
+    }
+  ],
+  "contain_threat_classes": ["malicious"],
+  "default": "deny"
+}

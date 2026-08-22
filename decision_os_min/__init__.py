@@ -99,8 +99,8 @@ __all__ = [
 
 # The forced-path adoption surface (governed tools). Imported last: govern.py
 # consumes DecisionOS (defined above) lazily, so there is no import cycle.
-from .host import AgentClient, AgentHost, Intent, spawn_host  # noqa: E402
 from .govern import GovernanceRefused, Governor, current_actor, set_actor  # noqa: E402
+from .host import AgentClient, AgentHost, Intent, locked_agent_docker_cmd, spawn_host  # noqa: E402
 from .sealed import (  # noqa: E402
     AdmissionError,
     AdmissionOffice,
@@ -117,6 +117,7 @@ __all__ += [
     "AgentClient",
     "AgentHost",
     "Intent",
+    "locked_agent_docker_cmd",
     "spawn_host",
     "AdmissionError",
     "AdmissionOffice",

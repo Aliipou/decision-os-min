@@ -265,6 +265,47 @@ def spawn_host(
     return AgentClient(proc=proc, agent_id=agent_id)
 
 
+def locked_agent_docker_cmd(
+    agent_script: str | Path,
+    *,
+    image: str | None = None,
+    seccomp: str | Path | None = None,
+    lock_script: str | Path | None = None,
+) -> list[str]:
+    """Build ``docker run … lock_and_run.py <agent>`` for TM-A profile.
+
+    Does not start the container — caller runs it. See ``sandbox/README.md``.
+    Host stays *outside* the agent container (IPC via stdin/stdout or network
+    to Host is a deployment choice; default probe uses no network).
+    """
+    root = Path(__file__).resolve().parents[1]
+    img = image or os.environ.get("AGENT_SANDBOX_IMAGE", "decision-os-agent:noambient-v1")
+    agent = Path(agent_script).resolve()
+    lock = Path(lock_script) if lock_script else root / "sandbox" / "lock_and_run.py"
+    sc = Path(seccomp) if seccomp else root / "sandbox" / "seccomp-agent-noambient-v1.json"
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--read-only",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        f"--security-opt=seccomp={sc}",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=8m",
+        "-v",
+        f"{agent}:/agent.py:ro",
+        "-v",
+        f"{lock}:/lock_and_run.py:ro",
+        img,
+        "python",
+        "/lock_and_run.py",
+        "/agent.py",
+    ]
+
+
 def agent_has_no_effect_handles(namespace: dict[str, Any]) -> bool:
     """Destructor helper: agent namespace must not contain live effect adapters."""
     banned = ("deploy_ranking", "set_price", "send_email", "wire_money", "httpx", "requests")

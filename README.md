@@ -39,48 +39,37 @@ effect ONLY against that signed, bound decision and unspent token; every decisio
 is appended to **one** tamper-evident hash-chained log. That is the whole security
 model — in ~400 lines, stdlib + `cryptography` only.
 
-## Status — 2026-08-10
+## Status — infrastructure claims (2026-08-23)
 
-Three claims in this README were tested this week. One held, one was corrected, one
-was falsified and fixed twice. All three results are in the repository.
+Do **not** read “AI infrastructure” as “fully non-bypassable.” Claims are sliced:
 
-**1. The pipeline order is NOT locked, and order carries no meaning.** Composition is
-the **meet of a bounded verdict lattice**, deny-dominant: `ALLOW ≺ LIMIT ≺ CONTAIN ≺
-DEFER ≺ DENY`, with `DENY` absorbing. `meet` is commutative and associative, so
-evaluator order is a *performance* choice and nothing else. `LegitimacyAuthorityPipeline`
-still ships and still works, but `tests/test_evaluators.py` proves it is equivalent to
-`handle(..., evaluators=[legitimacy(policy)])` on the whole truth table — the sequential
-stage is redundant. The only genuine ordering constraint is engineering, not primacy:
-the one-time token mint plus audit-before-effect must be the single terminal commit.
+| Layer | Claim | Status |
+|---|---|---|
+| Decision core / PEP / composition | Signed authority + audit + red-team regressions | **PASS** (in-repo tests) |
+| **TM-H** Hosted agent plane | Host-registered effects only via Intent → Admission→FDK→Auth→PEP | **PASS** — `docs/HOSTED_AGENT_PLANE.md` |
+| **TM-A-v1 FS/NET** | No durable FS write / outbound net / ambient product creds under Docker profile | **PASS** — `sandbox/` |
+| **AgentCreatedProcess + W^X/ptrace** | After `lock_and_run` | **PASS** under declared Linux/Docker profile |
+| **TM-A full** `DirectEffect(Agent)=∅` | Absolute ambient isolation | **PARTIAL** — breakout/Host residuals |
+| SealedRuntime alone vs ambient Python | In-process sealing stops sealed-surface bypasses; ambient `open`/`socket` still exist without OS jail | intentional limit |
 
-**2. Stacking two engines is not merely untidy — it is incorrect.** Engine A rules and
-**mints a one-time capability** before engine B is consulted, so B's refusal arrives
-after the mint and a live token exists for a refused action. Composed, the veto lands
-before the mint. See `tests/test_authority_convergence.py`.
+Threat-model source of truth: [`docs/THREAT_MODELS.md`](docs/THREAT_MODELS.md).
 
-**3. "An untrusted evaluator can at worst deny" was FALSE as implemented — twice.**
-A red team produced runnable exploits: field injection through the composer, a TOCTOU
-via the live action dict, and an evaluator authoring the executed payload. After the
-fix, a second red team broke the fix: a `str` subclass whose *value* was `"DENY"` but
-whose `__hash__`/`__eq__` impersonated `"ALLOW"` governed the fold as a veto and then
-passed the mint gate — a semantic veto that executed, with a signature that verified.
-Both are closed; `tests/test_redteam_composition.py` and `tests/test_redteam_round2.py`
-keep the attacks as permanent regressions. The lesson is recorded because it will
-recur: **"fail-closed for the variant I happened to write" is not fail-closed.**
+### Earlier composition / red-team results (still held)
 
-Former deliberate gaps are closed: evaluator timeout (default 1s, configurable),
-plugin-raised `BaseException` composes as DENY, and `LegitimacyAuthorityPipeline`
-delegates to the composed legitimacy evaluator so reasons converge. AE-10 (audit
-fidelity on composed DENY) remains closed. Residual intentional limits (obligation
-union, thread-timeout orphans) stay documented in the red-team regression file.
+Three claims tested earlier. One held, one corrected, one falsified and fixed twice:
 
-**Conformance:** 10 pass / 0 fail / 0 not-applicable against the Authority Enforcement
-Profile (`contracts-spec/conformance/`). AE-4/AE-5 are satisfied by a macaroon-inspired
-attenuation graph (`decision_os_min/attenuation.py`) — caveats can only narrow; child
-expiry is clamped to the parent. Not a full Macaroon/Biscuit implementation; the
-profile's governing property only.
+**1. Pipeline order is NOT a security meet.** Composition is the meet of a bounded
+verdict lattice (`ALLOW ≺ LIMIT ≺ CONTAIN ≺ DEFER ≺ DENY`); order is performance.
 
-191 tests, ruff and mypy clean.
+**2. Stacking two engines that each mint is incorrect** — compose before mint.
+See `tests/test_authority_convergence.py`.
+
+**3. “Untrusted evaluator can at worst deny” was FALSE twice** — closed; kept as
+regressions in `tests/test_redteam_composition.py` and `tests/test_redteam_round2.py`.
+
+**Conformance:** Authority Enforcement Profile (`contracts-spec/conformance/`).
+AE-4/AE-5 use a macaroon-inspired attenuation graph (`decision_os_min/attenuation.py`)
+— caveats only narrow; child expiry clamped to parent.
 
 ## How it flows
 
@@ -117,11 +106,11 @@ fewer layers, same gate-passes.
 
 ## Govern your agent's tools — signed authorization + audit
 
-The wedge: **safe tool execution for production AI agents.** You write a policy
-once and wrap your tool registry; from then on there is **no way to call a tool
-that skips the kernel** — the wrapped callable *is* the governed tool. (Not
-literally "one line": you define a policy, create a `Governor`, wrap your tools,
-and set the agent identity — a handful of lines, shown below.)
+The wedge: **governed tool execution for AI agents** under an explicit threat model.
+You write a policy and wrap tools / use the Hosted plane; host-registered effects
+cannot skip Admission→legitimacy→authority→PEP. **Ambient OS effects** (files,
+sockets, subprocess) are **not** closed by the Python library alone — use the
+Docker + `lock_and_run` profile (`sandbox/`) for TM-A slices.
 
 ```python
 from decision_os_min import Governor, set_actor, GovernanceRefused
@@ -179,22 +168,33 @@ curl -X POST localhost:8080/v1/decide -H 'content-type: application/json' \
 # -> {"decision":{"verdict":"ALLOW",...},"signature":"...","token":{...},"audit_seq":0}
 ```
 
-Endpoints: `POST /v1/decide` (signed decision + audit), `GET /v1/pubkey` (verify
-key), `GET /v1/audit` + `/v1/audit/verify` (tamper-evident trail), `GET /healthz`,
-`GET /metrics`, `GET /openapi.json`. The service is the **authority + audit** — it
-does not execute your tools; the caller's PEP enforces the verdict + one-time
-token locally.
+Endpoints: `POST /v1/decide`, `GET /v1/pubkey`, `GET /v1/audit` + `/v1/audit/verify`
+(audit dump off unless `DECISION_OS_EXPOSE_AUDIT=1`), `GET /healthz`, `GET /readyz`,
+`GET /metrics`, `GET /openapi.json`. Authority + audit only — caller's PEP executes.
 
-Docker:
+Docker / Compose:
 
 ```bash
+docker compose up --build -d
+curl -s localhost:8080/readyz
+# or:
 docker build -t decision-os-min .
-docker run -p 8080:8080 -v $PWD/policy.json:/config/policy.json \
-  -e DECISION_OS_POLICY=/config/policy.json decision-os-min
+docker run -p 8080:8080 -v $PWD/deploy/policy.json:/config/policy.json \
+  -e DECISION_OS_POLICY=/config/policy.json \
+  -e DECISION_OS_KEY_FILE=/data/kernel_ed25519.pem decision-os-min
 ```
 
-**This is a *starter*, not production-grade.** Auth, TLS, rate limiting, and
-horizontal scale belong at the ingress in front of it (see Out of Scope).
+See [`INFRA.md`](INFRA.md). **Starter, not production-grade** — auth/TLS/rate limits at ingress.
+
+## Hosted agents + OS isolation
+
+```text
+Untrusted agent  --Intent IPC-->  AgentHost (SealedRuntime + adapters)
+     optional: Docker agent-noambient-v1 + lock_and_run
+```
+
+- Host plane: `decision_os_min.host`, `docs/HOSTED_AGENT_PLANE.md`
+- Agent sandbox: `sandbox/README.md`, `docs/THREAT_MODELS.md`
 
 ## Extending it (plugins)
 

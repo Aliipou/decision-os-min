@@ -1,36 +1,44 @@
-# OS isolation profile: `agent-noambient-v1` (+ optional process lock)
+# OS isolation profile: `agent-noambient-v1` + `lock_and_run`
 
-## Claim slices (do not say bare “TM-A PASS”)
+## Claim slices — never write bare “TM-A PASS”
 
-| Slice | Expected |
-|---|---|
-| **TM-A-v1 FS/NET** | Durable write BLOCKED; outbound net BLOCKED; product creds ABSENT |
-| **TM-A full** | Above **and** `subprocess` BLOCKED via post-bootstrap lock |
+| Slice | Locked evidence | Unlocked destructor |
+|---|---|---|
+| **TM-A-v1 FS/NET** | FS write + outbound net **BLOCKED**; product creds **ABSENT** | FS often `WROTE` on host |
+| **AgentCreatedProcess** | `subprocess` **BLOCKED** | `RAN` |
+| **Non-exec W^X / ptrace** | `mmap_exec` / `mprotect_exec` / `ptrace` **BLOCKED** | `MAPPED` / `EXEC_GRANTED` / `ATTACHED` |
+| **TM-A full** | **PARTIAL** | breakout / Host / out-of-profile |
 
-## How it works
+## Lifecycle
 
 ```text
-runc execve(python)          # allowed (container must boot)
-  → lock_and_run.py          # trusted
-  → seccomp deny execve* + NO_NEW_PRIVS
-  → tm_a_probe / agent       # untrusted
+runc execve(python)                 # container must boot
+  → warm-import stdlib .so
+  → lock_and_run: NO_NEW_PRIVS + seccomp
+       deny execve/execveat
+       deny mmap/mprotect when PROT_EXEC
+       deny ptrace / process_vm_* 
+  → untrusted agent / probe
 ```
 
 Docker flags: `--read-only --network=none --cap-drop=ALL --security-opt=no-new-privileges`
-plus start seccomp (connect/bind deny) + agent image with `libseccomp2`.
+plus start seccomp (connect/bind) + image with `libseccomp2`.
 
-## How to run
+Helper: `decision_os_min.host.locked_agent_docker_cmd(agent.py)`.
+
+## Run
 
 ```bash
 docker build -t decision-os-agent:noambient-v1 -f sandbox/Dockerfile.agent sandbox/
 ./sandbox/run_tm_a_probes.sh
+pytest -m tm_a tests/test_os_isolation.py
 ```
 
-## Residual (even if subprocess BLOCKED)
+## Residuals (why TM-A full ≠ PASS)
 
-- In-process RCE without exec (mmap, memory corruption)
 - Kernel / container breakout
 - Compromised Host
-- Trust in `lock_and_run.py` as TCB in the agent image
+- Pure-Python use of APIs warmed before lock that are not consequential OS effects
+- New native `.so` after lock fails by design (warm list is TCB-adjacent)
 
-See `docs/SUBPROCESS_BOUNDARY.md`.
+See `docs/THREAT_MODELS.md`, `docs/SUBPROCESS_BOUNDARY.md`.
