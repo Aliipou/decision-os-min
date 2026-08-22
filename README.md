@@ -10,7 +10,7 @@ into one `handle()` call.**
 > advantages over existing tools are not yet proven by independent evaluation.
 
 > **Legitimacy ⊥ Authority — two enforced layers of one engineered moral order**
-> (see root [`POSITIONING.md`](../POSITIONING.md)). This is not "just a legitimacy
+> (see [`contracts-spec/POSITIONING.md`](../contracts-spec/POSITIONING.md)). This is not "just a legitimacy
 > filter" and not "just neutral plumbing." Two independent layers:
 > - **FDK — legitimacy** (ownership / consent / verifier): *should this happen at
 >   all?* A **DENY-only** gate. Runs **first**.
