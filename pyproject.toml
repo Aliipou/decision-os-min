@@ -45,3 +45,5 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Windows: default %TEMP%\pytest-of-* can hit WinError 5 (access denied).
+addopts = "--basetemp=.pytest-basetemp"
