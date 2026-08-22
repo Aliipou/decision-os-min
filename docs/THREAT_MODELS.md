@@ -1,9 +1,10 @@
 # Threat Models — Formal Split (Frozen)
 
-**Status:** Locked 2026-08-23  
+**Status:** Locked 2026-08-23 (claim naming revised after subprocess residual)  
 **Source of truth for claims:** this file + `HOSTED_AGENT_PLANE.md` + `ARCHITECTURE_DERIVATION.md`
 
-Do **not** mix TM-H and TM-A in outreach or CI badges.
+Do **not** mix TM-H and TM-A in outreach or CI badges.  
+Do **not** write bare **“TM-A PASS”** — always qualify the slice.
 
 ---
 
@@ -19,10 +20,7 @@ adapters, credentials for the product) live only in the Host.
   Executed(e) ⇒ Admission ∧ Legitimacy ∧ Authority ∧ PEP
 ```
 
-**In scope:** deploy_ranking, audit_export, DB/HTTP adapters owned by Host, etc.  
-**Out of scope:** whether the agent can `open()` a scratch file in its own FS.
-
-**Evidence today:** PASS — `tests/test_hosted_agent_plane.py`, SealedRuntime destructors.
+**Evidence today:** **PASS** — `tests/test_hosted_agent_plane.py`, SealedRuntime destructors.
 
 **Claim language:**
 
@@ -35,27 +33,34 @@ adapters, credentials for the product) live only in the Host.
 **Adversary:** Untrusted agent process with whatever ambient OS rights the
 deployment left it.
 
-**Invariant:**
+**Full invariant (unchanged — do not weaken):**
 
 ```text
 DirectEffect(Agent) = ∅
 ```
 
-under the **declared** sandbox profile (filesystem write, arbitrary network,
-subprocess/exec, access to product credentials / host adapters).
+under the declared sandbox profile. **Subprocess / agent-created processes remain
+in scope.** Removing them from the definition to green a test is forbidden.
 
-**In scope:** `open`/`write`, `socket.connect`, `subprocess`, env secrets, importing
-host adapters.  
-**Out of scope:** compromising the Host or the OS kernel (TM-K).
+### Claim slices (required naming)
 
-**Evidence today:**
-- Without sandbox: FAIL — ambient probes succeed (`tm_a_probe.py` control).
-- With `agent-noambient-v1` (Docker): **FS write + network** MUST be BLOCKED; credentials ABSENT.
-- **Residual gap (real):** `subprocess`/`execve` of image binaries often still **RAN** — blocking `execve` in seccomp also prevents container start. Not a v1 PASS gate; next harden (gVisor / nested jail), not more Python sealing.
+| Slice | Meaning | Status today |
+|---|---|---|
+| **TM-A-v1 FS/NET** | No durable FS write + no outbound network + no ambient product credentials | **PASS** under Docker `agent-noambient-v1` |
+| **AgentCreatedProcess** | After trusted `lock_and_run` seccomp | **PASS** under same profile + lock (destructor: unlocked still `RAN`) |
+| **TM-A full** | Full `DirectEffect(Agent)=∅` (incl. non-exec in-process RCE) | **PARTIAL** — residuals: mmap/shellcode-class, breakout, Host compromise |
 
-**Claim language (only after suite PASS on declared platform):**
+**Evidence:**
 
-> OS-isolated untrusted agent under profile `agent-noambient-v1`.
+- Control (no sandbox): FS `WROTE`
+- Docker flags only (no lock): FS/NET BLOCKED, subprocess **RAN**
+- Docker + `lock_and_run.py`: FS/NET/subprocess **BLOCKED** (`tests/test_os_isolation.py`)
+
+**Allowed claim language:**
+
+> TM-A-v1 FS/NET + AgentCreatedProcess lock under `agent-noambient-v1`.
+
+**Forbidden:** bare “TM-A PASS” (implies zero residual DirectEffect).
 
 ---
 
@@ -63,9 +68,10 @@ host adapters.
 
 | Phrase | Allowed? |
 |---|---|
+| TM-A PASS (unqualified) | **No** while full DirectEffect is PARTIAL |
 | Fully non-bypassable AI infrastructure | No |
 | We secured Python | No |
-| Trusted execution infrastructure | No until TM-A PASS + documented residual |
+| Trusted execution infrastructure | No until TM-A full PASS + documented residual |
 | Rust makes it secure | No — Rust is optional host hardening later |
 
 ---
@@ -73,10 +79,8 @@ host adapters.
 ## Roadmap (frozen order)
 
 ```text
-1. Freeze Hosted Plane (TM-H)     ← done
-2. Formalize TM-H / TM-A          ← this file
-3. Break TM-A with real attacks, then harden sandbox until they FAIL
-4. Only then: which Host pieces need a smaller native TCB (maybe Rust)
+1. Freeze Hosted Plane (TM-H)                    ← done
+2. Formalize TM-H / TM-A + claim slices          ← this file
+3. Close AgentCreatedProcess (lifecycle-aware)   ← next — see SUBPROCESS_BOUNDARY.md
+4. Only then: Host native TCB (maybe Rust)
 ```
-
-**Next engineering step is TM-A sandbox experiments — not a Rust rewrite.**

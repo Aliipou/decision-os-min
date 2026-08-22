@@ -38,14 +38,17 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - name: Pull probe image
-        run: docker pull python:3.12-slim-bookworm
+      - name: Build agent sandbox image
+        run: docker build -t decision-os-agent:noambient-v1 -f sandbox/Dockerfile.agent sandbox/
       - name: Run TM-A sandbox probes
         run: bash sandbox/run_tm_a_probes.sh
+        env:
+          AGENT_SANDBOX_IMAGE: decision-os-agent:noambient-v1
       - name: Pytest TM-A markers
         run: pytest -q -m tm_a tests/test_os_isolation.py
         env:
           AUTHGATE_BACKEND: python
+          AGENT_SANDBOX_IMAGE: decision-os-agent:noambient-v1
 
   docker:
     runs-on: ubuntu-latest

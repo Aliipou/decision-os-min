@@ -1,30 +1,36 @@
-# OS isolation profile: `agent-noambient-v1`
+# OS isolation profile: `agent-noambient-v1` (+ optional process lock)
 
-## Guarantees (when suite PASS)
+## Claim slices (do not say bare “TM-A PASS”)
 
-Under Docker flags + seccomp profile in this directory, the untrusted agent MUST NOT:
-
-| Probe | Expected (v1) |
+| Slice | Expected |
 |---|---|
-| Durable filesystem write (`AGENT_PROBE_PATH`) | BLOCKED (`--read-only`) |
-| Outbound `socket.connect` | BLOCKED (`--network=none` + seccomp) |
-| Product credentials in env | ABSENT |
-| Host effect adapters | ABSENT (not mounted) |
+| **TM-A-v1 FS/NET** | Durable write BLOCKED; outbound net BLOCKED; product creds ABSENT |
+| **TM-A full** | Above **and** `subprocess` BLOCKED via post-bootstrap lock |
 
-| Probe | Residual (not a v1 PASS gate) |
-|---|---|
-| `subprocess` / `execve` of image binaries | Often still **RAN** — blocking `execve` in seccomp also blocks container start |
+## How it works
 
-## Non-guarantees
+```text
+runc execve(python)          # allowed (container must boot)
+  → lock_and_run.py          # trusted
+  → seccomp deny execve* + NO_NEW_PRIVS
+  → tm_a_probe / agent       # untrusted
+```
 
-- Kernel exploits / container breakout
-- Compromised Host
-- Windows native isolation without Docker (local Windows = Docker Desktop or skip)
-- Full denial of `exec` inside the image (needs stronger runtime: gVisor / nested jail — next harden)
+Docker flags: `--read-only --network=none --cap-drop=ALL --security-opt=no-new-privileges`
+plus start seccomp (connect/bind deny) + agent image with `libseccomp2`.
+
 ## How to run
 
 ```bash
+docker build -t decision-os-agent:noambient-v1 -f sandbox/Dockerfile.agent sandbox/
 ./sandbox/run_tm_a_probes.sh
 ```
 
-CI: workflow job `tm-a-isolation` on `ubuntu-latest`.
+## Residual (even if subprocess BLOCKED)
+
+- In-process RCE without exec (mmap, memory corruption)
+- Kernel / container breakout
+- Compromised Host
+- Trust in `lock_and_run.py` as TCB in the agent image
+
+See `docs/SUBPROCESS_BOUNDARY.md`.

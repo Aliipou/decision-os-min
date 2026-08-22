@@ -42,7 +42,12 @@ class AdmissionError(RuntimeError):
 
 
 class SealedRefused(RuntimeError):
-    def __init__(self, verdict: str, reason: str | None, evidence: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        verdict: str,
+        reason: str | None,
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(f"sealed refused: {verdict} ({reason})")
         self.verdict = verdict
         self.reason = reason
@@ -447,12 +452,34 @@ class SealedRuntime:
             output = self.executor.execute(action, result, tools_map)
         except ExecutionRefused as exc:
             rec = self._emit(
-                action, agent_id, intent, resource, auth_preview, decision, result, False, None, f"PEP:{exc}"
+                action,
+                agent_id,
+                intent,
+                resource,
+                auth_preview,
+                decision,
+                result,
+                False,
+                None,
+                f"PEP:{exc}",
             )
-            raise SealedRefused(decision.get("verdict", DENY), f"{decision.get('reason')} [{exc}]", rec.as_dict()) from exc
+            raise SealedRefused(
+                decision.get("verdict", DENY),
+                f"{decision.get('reason')} [{exc}]",
+                rec.as_dict(),
+            ) from exc
 
         self._emit(
-            action, agent_id, intent, resource, auth_preview, decision, result, True, output, "PERMIT+execute"
+            action,
+            agent_id,
+            intent,
+            resource,
+            auth_preview,
+            decision,
+            result,
+            True,
+            output,
+            "PERMIT+execute",
         )
         return output
 

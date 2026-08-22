@@ -1,6 +1,7 @@
-"""TM-A OS isolation — ambient effects MUST be BLOCKED under declared profile.
+"""TM-A OS isolation — claim slices, not bare TM-A PASS.
 
-TM-H tests remain in test_hosted_agent_plane.py and must stay green independently.
+TM-A-v1 FS/NET: durable write + outbound net + creds.
+TM-A full: also AgentCreatedProcess (post-bootstrap lock).
 """
 
 from __future__ import annotations
@@ -15,10 +16,11 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "sandbox" / "run_tm_a_probes.sh"
 PROBE = ROOT / "sandbox" / "tm_a_probe.py"
+LOCK = ROOT / "sandbox" / "lock_and_run.py"
 SECCOMP = ROOT / "sandbox" / "seccomp-agent-noambient-v1.json"
-IMAGE = os.environ.get("AGENT_SANDBOX_IMAGE", "python:3.12-slim-bookworm")
+DOCKERFILE = ROOT / "sandbox" / "Dockerfile.agent"
+IMAGE = os.environ.get("AGENT_SANDBOX_IMAGE", "decision-os-agent:noambient-v1")
 
 
 def _docker_ok() -> bool:
@@ -38,8 +40,110 @@ def _docker_ok() -> bool:
         return False
 
 
-def _run_docker_probe() -> tuple[int, str, str]:
-    """Invoke Docker directly (avoids Windows System32 bash + CRLF issues)."""
+def _ensure_agent_image() -> None:
+    inspect = subprocess.run(
+        ["docker", "image", "inspect", IMAGE],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if inspect.returncode == 0:
+        return
+    build = subprocess.run(
+        ["docker", "build", "-t", IMAGE, "-f", str(DOCKERFILE), str(ROOT / "sandbox")],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert build.returncode == 0, build.stderr
+
+
+def _run_locked_probe() -> tuple[int, str, str]:
+    _ensure_agent_image()
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--read-only",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        f"--security-opt=seccomp={SECCOMP}",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=8m",
+        "-e",
+        "AGENT_PROBE_PATH=/agent_wrote.txt",
+        "-v",
+        f"{PROBE}:/probe.py:ro",
+        "-v",
+        f"{LOCK}:/lock_and_run.py:ro",
+        IMAGE,
+        "python",
+        "/lock_and_run.py",
+        "/probe.py",
+    ]
+    r = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(ROOT),
+    )
+    return r.returncode, r.stdout, r.stderr
+
+
+@pytest.mark.tm_a
+def test_tm_a_unsandboxed_probe_still_shows_ambient_risk(tmp_path):
+    """Control: without sandbox, ambient FS write succeeds — TM-A is not free."""
+    env = os.environ.copy()
+    env["AGENT_PROBE_PATH"] = str(tmp_path / "agent_wrote.txt")
+    r = subprocess.run(
+        [sys.executable, str(PROBE)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout.strip().splitlines()[-1])
+    d = report["direct_effects"]
+    assert d["filesystem"] == "WROTE"
+    assert d["credentials"] == "ABSENT"
+
+
+@pytest.mark.tm_a
+def test_tm_a_v1_fs_net_and_process_lock():
+    """TM-A-v1 FS/NET + process-lock candidate: FS, net, subprocess BLOCKED."""
+    if not _docker_ok():
+        pytest.skip("docker not available")
+    for path in (PROBE, LOCK, SECCOMP, DOCKERFILE):
+        if not path.is_file():
+            pytest.fail(f"missing {path}")
+
+    code, stdout, stderr = _run_locked_probe()
+    assert code == 0, f"stdout={stdout}\nstderr={stderr}"
+    assert "LOCKDOWN_FAIL" not in stderr
+    report = json.loads(stdout.strip().splitlines()[-1])
+    d = report["direct_effects"]
+    assert str(d["filesystem"]).startswith("BLOCKED"), d
+    assert str(d["network"]).startswith("BLOCKED"), d
+    assert str(d["subprocess"]).startswith("BLOCKED"), d
+    assert d["credentials"] == "ABSENT", d
+
+
+@pytest.mark.tm_a
+def test_destructor_unlocked_container_still_allows_subprocess():
+    """Destructor: without lock_and_run, subprocess still RAN (documents residual)."""
+    if not _docker_ok():
+        pytest.skip("docker not available")
+    _ensure_agent_image()
     cmd = [
         "docker",
         "run",
@@ -66,49 +170,7 @@ def _run_docker_probe() -> tuple[int, str, str]:
         timeout=180,
         encoding="utf-8",
         errors="replace",
-        cwd=str(ROOT),
-    )
-    return r.returncode, r.stdout, r.stderr
-
-
-@pytest.mark.tm_a
-def test_tm_a_unsandboxed_probe_still_shows_ambient_risk(tmp_path):
-    """Control: without sandbox, at least one ambient probe often succeeds.
-
-    Documents why TM-A is not automatic from TM-H.
-    """
-    env = os.environ.copy()
-    env["AGENT_PROBE_PATH"] = str(tmp_path / "agent_wrote.txt")
-    r = subprocess.run(
-        [sys.executable, str(PROBE)],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30,
-        encoding="utf-8",
-        errors="replace",
     )
     assert r.returncode == 0, r.stderr
     report = json.loads(r.stdout.strip().splitlines()[-1])
-    d = report["direct_effects"]
-    assert d["filesystem"] == "WROTE"
-    assert d["credentials"] == "ABSENT"
-
-
-@pytest.mark.tm_a
-def test_tm_a_docker_sandbox_blocks_ambient_effects():
-    """PASS criterion for OS-isolated agent under agent-noambient-v1 (FS+net)."""
-    if not _docker_ok():
-        pytest.skip("docker not available")
-    if not PROBE.is_file() or not SECCOMP.is_file():
-        pytest.fail("missing sandbox probe/seccomp files")
-
-    code, stdout, stderr = _run_docker_probe()
-    assert code == 0, f"stdout={stdout}\nstderr={stderr}"
-    report = json.loads(stdout.strip().splitlines()[-1])
-    d = report["direct_effects"]
-    assert str(d["filesystem"]).startswith("BLOCKED"), d
-    assert str(d["network"]).startswith("BLOCKED"), d
-    assert d["credentials"] == "ABSENT", d
-    # Residual: subprocess often still RAN — do not gate v1 on exec denial.
-    assert "subprocess" in d
+    assert report["direct_effects"]["subprocess"] == "RAN"

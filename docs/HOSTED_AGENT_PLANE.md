@@ -10,7 +10,8 @@
 
 - “Fully non-bypassable AI infrastructure”
 - “We secured Python”
-- “DirectEffect(Agent)=∅ on every OS without sandbox”
+- “DirectEffect(Agent)=∅” (full) while subprocess still runs
+- Bare **“TM-A PASS”** — always say **TM-A-v1 FS/NET** vs **TM-A full**
 
 ## Architecture
 
@@ -24,15 +25,6 @@ no effect adapters                  AuthGate / decision kernel
                                     Effect adapters (only here)
 ```
 
-Conceptual shift:
-
-```text
-was:  Agent → (hopefully uses) Governance
-now:  Agent → Host → Governance → Effect
-```
-
-The agent no longer owns the execution path for host-registered effects.
-
 ## Evidence
 
 | Property | Threat model | Status | Evidence |
@@ -40,23 +32,16 @@ The agent no longer owns the execution path for host-registered effects.
 | Host-registered effect ⇒ chain | **TM-H** | **PASS** | `tests/test_hosted_agent_plane.py` |
 | Agent has no tool/adapter handles | **TM-H** | **PASS** | h3/h4 |
 | IPC-only path to host effects | **TM-H** | **PASS** | h2/h4 |
-| DirectEffect(Agent)=∅ (FS/net) | **TM-A** | **PASS** under `agent-noambient-v1` Docker | `tests/test_os_isolation.py` |
-| DirectEffect subprocess/exec | **TM-A** | **RESIDUAL** — often `RAN` | same probe; next: gVisor/nested jail |
+| Durable FS write + outbound net + ambient creds | **TM-A-v1 FS/NET** | **PASS** | `tests/test_os_isolation.py` |
+| AgentCreatedProcess after `lock_and_run` | **TM-A process lock** | **PASS** (Linux/Docker) | same; unlocked destructor still `RAN` |
+| Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | non-exec in-process / breakout residuals |
 
-See [`THREAT_MODELS.md`](THREAT_MODELS.md). Do not mix TM-H PASS with TM-A.
-
-## Components
-
-| # | Item | Status |
-|---|---|---|
-| 1–7 | Host + IPC + FDK/AuthGate/PEP/adapters | done |
-| 8 | OS sandbox `agent-noambient-v1` | Linux/Docker CI — Windows local = skip |
-| 9–10 | Audit + destructor tests (TM-H) | done |
+See [`THREAT_MODELS.md`](THREAT_MODELS.md), [`SUBPROCESS_BOUNDARY.md`](SUBPROCESS_BOUNDARY.md).
 
 ## Next milestone
 
-Break TM-A with real ambient attacks; harden `agent-noambient-v1` until they stay BLOCKED.
-Only then revisit native TCB (maybe Rust) for Host compromise resistance.
+Attack the process-lock residual classes (in-process non-exec, lock bypass).
+Do not declare bare TM-A PASS. Only then revisit Host native TCB.
 
 ## Ladder
 
@@ -66,4 +51,6 @@ Only then revisit native TCB (maybe Rust) for Host compromise resistance.
 | FDK + AuthGate + PEP | governance runtime |
 | SealedRuntime | enforced execution surface (in-process) |
 | **Hosted agent plane** | **infrastructure architecture (this)** |
+| OS FS/NET isolation (v1) | **PASS** slice |
+| OS process-creation isolation | **PARTIAL** — open research |
 | TCB + OS/CPU enforcement | security system primitive (future) |

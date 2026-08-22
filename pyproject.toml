@@ -35,7 +35,7 @@ select = ["E", "F", "I", "B", "UP"]
 # E501 (line length) is relaxed for tests, runnable examples, and benchmarks:
 # these contain wide literal data rows where wrapping hurts readability.
 "tests/**" = ["E501"]
-"examples/**" = ["E501"]
+"examples/**" = ["E501", "E402"]
 "bench/**" = ["E501"]
 
 [tool.mypy]

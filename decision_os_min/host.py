@@ -20,7 +20,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import threading
 import uuid
 from collections.abc import Callable
@@ -271,6 +270,7 @@ def agent_has_no_effect_handles(namespace: dict[str, Any]) -> bool:
     banned = ("deploy_ranking", "set_price", "send_email", "wire_money", "httpx", "requests")
     for name in banned:
         obj = namespace.get(name)
-        if callable(obj) and not getattr(obj, "__name__", "").startswith(("host_only_", "poisoned_")):
+        name_attr = getattr(obj, "__name__", "")
+        if callable(obj) and not name_attr.startswith(("host_only_", "poisoned_")):
             return False
     return True
