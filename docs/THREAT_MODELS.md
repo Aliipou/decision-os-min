@@ -1,86 +1,66 @@
 # Threat Models — Formal Split (Frozen)
 
-**Status:** Locked 2026-08-23 (claim naming revised after subprocess residual)  
-**Source of truth for claims:** this file + `HOSTED_AGENT_PLANE.md` + `ARCHITECTURE_DERIVATION.md`
+**Status:** Locked 2026-08-23 (updated after W^X / ptrace lock evidence)  
+**Source of truth:** this file + `HOSTED_AGENT_PLANE.md` + `SUBPROCESS_BOUNDARY.md`
 
-Do **not** mix TM-H and TM-A in outreach or CI badges.  
-Do **not** write bare **“TM-A PASS”** — always qualify the slice.
+Do **not** mix TM-H and TM-A. Do **not** write bare **“TM-A PASS”**.
 
 ---
 
 ## TM-H — Host-registered product effects
 
-**Adversary:** Untrusted agent that may be malicious, but product effects (tools,
-adapters, credentials for the product) live only in the Host.
+**Evidence:** **PASS** — `tests/test_hosted_agent_plane.py`
 
-**Invariant:**
-
-```text
-∀ host-registered effect e:
-  Executed(e) ⇒ Admission ∧ Legitimacy ∧ Authority ∧ PEP
-```
-
-**Evidence today:** **PASS** — `tests/test_hosted_agent_plane.py`, SealedRuntime destructors.
-
-**Claim language:**
-
-> Hosted enforcement plane for host-registered effects.
+**Claim:** Hosted enforcement plane for host-registered effects.
 
 ---
 
 ## TM-A — Agent must not create consequential direct effects
 
-**Adversary:** Untrusted agent process with whatever ambient OS rights the
-deployment left it.
-
-**Full invariant (unchanged — do not weaken):**
+**Full invariant (unchanged):**
 
 ```text
 DirectEffect(Agent) = ∅
 ```
 
-under the declared sandbox profile. **Subprocess / agent-created processes remain
-in scope.** Removing them from the definition to green a test is forbidden.
+### Claim slices
 
-### Claim slices (required naming)
-
-| Slice | Meaning | Status today |
+| Slice | Meaning | Status |
 |---|---|---|
-| **TM-A-v1 FS/NET** | No durable FS write + no outbound network + no ambient product credentials | **PASS** under Docker `agent-noambient-v1` |
-| **AgentCreatedProcess** | After trusted `lock_and_run` seccomp | **PASS** under same profile + lock (destructor: unlocked still `RAN`) |
-| **TM-A full** | Full `DirectEffect(Agent)=∅` (incl. non-exec in-process RCE) | **PARTIAL** — residuals: mmap/shellcode-class, breakout, Host compromise |
+| **TM-A-v1 FS/NET** | Durable FS write + outbound net + ambient product creds | **PASS** |
+| **AgentCreatedProcess** | `subprocess` / `execve` after `lock_and_run` | **PASS** |
+| **Non-exec W^X / ptrace** | `mmap`/`mprotect` PROT_EXEC + `ptrace` after lock | **PASS** |
+| **TM-A full** | Zero residual DirectEffect (breakout, Host, logic bombs) | **PARTIAL** |
 
-**Evidence:**
-
-- Control (no sandbox): FS `WROTE`
-- Docker flags only (no lock): FS/NET BLOCKED, subprocess **RAN**
-- Docker + `lock_and_run.py`: FS/NET/subprocess **BLOCKED** (`tests/test_os_isolation.py`)
-
-**Allowed claim language:**
-
-> TM-A-v1 FS/NET + AgentCreatedProcess lock under `agent-noambient-v1`.
-
-**Forbidden:** bare “TM-A PASS” (implies zero residual DirectEffect).
-
----
-
-## What we will not claim
-
-| Phrase | Allowed? |
-|---|---|
-| TM-A PASS (unqualified) | **No** while full DirectEffect is PARTIAL |
-| Fully non-bypassable AI infrastructure | No |
-| We secured Python | No |
-| Trusted execution infrastructure | No until TM-A full PASS + documented residual |
-| Rust makes it secure | No — Rust is optional host hardening later |
-
----
-
-## Roadmap (frozen order)
+**Evidence (`tests/test_os_isolation.py`):**
 
 ```text
-1. Freeze Hosted Plane (TM-H)                    ← done
-2. Formalize TM-H / TM-A + claim slices          ← this file
-3. Close AgentCreatedProcess (lifecycle-aware)   ← next — see SUBPROCESS_BOUNDARY.md
-4. Only then: Host native TCB (maybe Rust)
+locked:   FS/NET/subprocess/mmap_exec/mprotect_exec/ptrace = BLOCKED*
+unlocked: subprocess=RAN, mmap_exec=MAPPED, mprotect_exec=EXEC_GRANTED, ptrace=ATTACHED
+```
+
+**Lifecycle note:** warm-import stdlib `.so` **before** W^X lock; after lock, new executable mappings fail (intentional — blocks late native loads).
+
+**Allowed claim:**
+
+> TM-A OS isolation under `agent-noambient-v1` + `lock_and_run` (FS/NET/process/W^X/ptrace).
+
+**Forbidden:** bare “TM-A PASS” / “fully non-bypassable”.
+
+### Remaining residuals (why TM-A full ≠ PASS)
+
+- Container/kernel breakout
+- Compromised Host (TM-H/TM-K)
+- Pure-Python abuse of **already-warmed** APIs that are not consequential OS effects
+- Anything outside the declared Docker+lock profile (e.g. raw Windows without Docker)
+
+---
+
+## Roadmap
+
+```text
+1. TM-H freeze                         ← done
+2. TM-A claim slices                   ← done
+3. AgentCreatedProcess + W^X lock      ← done (this evidence)
+4. Optional: Host native TCB / gVisor  ← only if residuals demand it
 ```

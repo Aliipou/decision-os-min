@@ -1,7 +1,7 @@
-"""TM-A OS isolation — claim slices, not bare TM-A PASS.
+"""TM-A OS isolation — claim slices + non-exec destructor class.
 
-TM-A-v1 FS/NET: durable write + outbound net + creds.
-TM-A full: also AgentCreatedProcess (post-bootstrap lock).
+TM-A-v1 FS/NET, AgentCreatedProcess, W^X/ptrace under lock_and_run.
+TM-A full remains PARTIAL for breakout / Host / pure-Python logic bombs.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ LOCK = ROOT / "sandbox" / "lock_and_run.py"
 SECCOMP = ROOT / "sandbox" / "seccomp-agent-noambient-v1.json"
 DOCKERFILE = ROOT / "sandbox" / "Dockerfile.agent"
 IMAGE = os.environ.get("AGENT_SANDBOX_IMAGE", "decision-os-agent:noambient-v1")
+
+_BLOCK = ("filesystem", "network", "subprocess", "mmap_exec", "mprotect_exec", "ptrace")
 
 
 def _docker_ok() -> bool:
@@ -99,7 +101,6 @@ def _run_locked_probe() -> tuple[int, str, str]:
 
 @pytest.mark.tm_a
 def test_tm_a_unsandboxed_probe_still_shows_ambient_risk(tmp_path):
-    """Control: without sandbox, ambient FS write succeeds — TM-A is not free."""
     env = os.environ.copy()
     env["AGENT_PROBE_PATH"] = str(tmp_path / "agent_wrote.txt")
     r = subprocess.run(
@@ -119,8 +120,8 @@ def test_tm_a_unsandboxed_probe_still_shows_ambient_risk(tmp_path):
 
 
 @pytest.mark.tm_a
-def test_tm_a_v1_fs_net_and_process_lock():
-    """TM-A-v1 FS/NET + process-lock candidate: FS, net, subprocess BLOCKED."""
+def test_tm_a_locked_blocks_fs_net_process_and_non_exec():
+    """Locked profile: FS/NET/subprocess + W^X + ptrace BLOCKED."""
     if not _docker_ok():
         pytest.skip("docker not available")
     for path in (PROBE, LOCK, SECCOMP, DOCKERFILE):
@@ -132,15 +133,14 @@ def test_tm_a_v1_fs_net_and_process_lock():
     assert "LOCKDOWN_FAIL" not in stderr
     report = json.loads(stdout.strip().splitlines()[-1])
     d = report["direct_effects"]
-    assert str(d["filesystem"]).startswith("BLOCKED"), d
-    assert str(d["network"]).startswith("BLOCKED"), d
-    assert str(d["subprocess"]).startswith("BLOCKED"), d
+    for key in _BLOCK:
+        assert str(d[key]).startswith("BLOCKED"), d
     assert d["credentials"] == "ABSENT", d
 
 
 @pytest.mark.tm_a
-def test_destructor_unlocked_container_still_allows_subprocess():
-    """Destructor: without lock_and_run, subprocess still RAN (documents residual)."""
+def test_destructor_unlocked_still_allows_process_and_wx():
+    """Without lock_and_run, subprocess + W^X + ptrace still succeed."""
     if not _docker_ok():
         pytest.skip("docker not available")
     _ensure_agent_image()
@@ -172,5 +172,8 @@ def test_destructor_unlocked_container_still_allows_subprocess():
         errors="replace",
     )
     assert r.returncode == 0, r.stderr
-    report = json.loads(r.stdout.strip().splitlines()[-1])
-    assert report["direct_effects"]["subprocess"] == "RAN"
+    d = json.loads(r.stdout.strip().splitlines()[-1])["direct_effects"]
+    assert d["subprocess"] == "RAN"
+    assert d["mmap_exec"] == "MAPPED"
+    assert d["mprotect_exec"] == "EXEC_GRANTED"
+    assert d["ptrace"] == "ATTACHED"

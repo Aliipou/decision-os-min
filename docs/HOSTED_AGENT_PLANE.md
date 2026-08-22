@@ -10,8 +10,7 @@
 
 - “Fully non-bypassable AI infrastructure”
 - “We secured Python”
-- “DirectEffect(Agent)=∅” (full) while subprocess still runs
-- Bare **“TM-A PASS”** — always say **TM-A-v1 FS/NET** vs **TM-A full**
+- Bare **“TM-A PASS”** — always name the slice
 
 ## Architecture
 
@@ -33,15 +32,16 @@ no effect adapters                  AuthGate / decision kernel
 | Agent has no tool/adapter handles | **TM-H** | **PASS** | h3/h4 |
 | IPC-only path to host effects | **TM-H** | **PASS** | h2/h4 |
 | Durable FS write + outbound net + ambient creds | **TM-A-v1 FS/NET** | **PASS** | `tests/test_os_isolation.py` |
-| AgentCreatedProcess after `lock_and_run` | **TM-A process lock** | **PASS** (Linux/Docker) | same; unlocked destructor still `RAN` |
-| Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | non-exec in-process / breakout residuals |
+| AgentCreatedProcess after `lock_and_run` | **TM-A process** | **PASS** | unlocked destructor still `RAN` |
+| W^X + ptrace after lock | **TM-A non-exec** | **PASS** | unlocked still `MAPPED`/`EXEC_GRANTED`/`ATTACHED` |
+| Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | breakout / Host / out-of-profile |
 
 See [`THREAT_MODELS.md`](THREAT_MODELS.md), [`SUBPROCESS_BOUNDARY.md`](SUBPROCESS_BOUNDARY.md).
 
 ## Next milestone
 
-Attack the process-lock residual classes (in-process non-exec, lock bypass).
-Do not declare bare TM-A PASS. Only then revisit Host native TCB.
+Only if residuals demand it: gVisor / Host native TCB.  
+Do not declare bare TM-A PASS.
 
 ## Ladder
 
@@ -51,6 +51,6 @@ Do not declare bare TM-A PASS. Only then revisit Host native TCB.
 | FDK + AuthGate + PEP | governance runtime |
 | SealedRuntime | enforced execution surface (in-process) |
 | **Hosted agent plane** | **infrastructure architecture (this)** |
-| OS FS/NET isolation (v1) | **PASS** slice |
-| OS process-creation isolation | **PARTIAL** — open research |
-| TCB + OS/CPU enforcement | security system primitive (future) |
+| OS FS/NET + process + W^X lock | **PASS** under declared profile |
+| Absolute DirectEffect=∅ | **PARTIAL** |
+| TCB + OS/CPU enforcement | future / optional |

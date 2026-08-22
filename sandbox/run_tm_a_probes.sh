@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# TM-A probes under agent-noambient-v1 + post-bootstrap process lock.
-# Exit 0 only if filesystem, network, AND subprocess are BLOCKED; credentials ABSENT.
+# TM-A probes under agent-noambient-v1 + post-bootstrap lock (process + W^X).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SECCOMP="$ROOT/sandbox/seccomp-agent-noambient-v1.json"
@@ -37,7 +36,7 @@ import json, sys
 report = json.loads(sys.argv[1])
 d = report["direct_effects"]
 errors = []
-for key in ("filesystem", "network", "subprocess"):
+for key in ("filesystem", "network", "subprocess", "mmap_exec", "mprotect_exec", "ptrace"):
     val = d.get(key, "")
     if not str(val).startswith("BLOCKED"):
         errors.append(f"{key}={val} (want BLOCKED*)")
@@ -46,5 +45,5 @@ if d.get("credentials") != "ABSENT":
 if errors:
     print("TM-A FAIL:", "; ".join(errors), file=sys.stderr)
     sys.exit(1)
-print("TM-A-v1+lock PASS: FS+NET+subprocess blocked")
+print("TM-A lock PASS: FS+NET+process+W^X+ptrace blocked")
 PY

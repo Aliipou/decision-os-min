@@ -80,12 +80,14 @@ Untrusted: agent module / `tm_a_probe.py` body after handoff.
 
 ## Implemented candidate result (2026-08-23)
 
-`sandbox/lock_and_run.py` + `Dockerfile.agent` (libseccomp2):
+`sandbox/lock_and_run.py` (warm imports → seccomp):
 
 ```text
-locked probe:   subprocess=BLOCKED:PermissionError  (PASS for AgentCreatedProcess)
-unlocked probe: subprocess=RAN                      (destructor still holds)
+locked:   FS/NET/subprocess/mmap_exec/mprotect_exec/ptrace = BLOCKED*
+unlocked: subprocess=RAN, mmap_exec=MAPPED, mprotect_exec=EXEC_GRANTED, ptrace=ATTACHED
 ```
 
-Residuals remain under **TM-A full** (non-exec in-process effects, breakout).
-See claim slices in `THREAT_MODELS.md`.
+**Tradeoff:** after W^X lock, new native `.so` loads fail (must warm before lock).
+
+**TM-A full** stays PARTIAL (breakout / Host / out-of-profile).
+See `THREAT_MODELS.md`.
