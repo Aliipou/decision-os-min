@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from .advisors import simple_threat_advisor
+from .attenuation import AttenuationError, AuthorityGraph, Macaroon
 from .audit import HashLog
 from .compose import Evaluator, compose, meet
 from .contracts import Action, AuditEntry, CapabilityToken, Decision, Verdict
@@ -88,12 +90,39 @@ __all__ = [
     "meet",
     "legitimacy",
     "LegitimacyPolicy",
+    # macaroon-inspired attenuation (AE-4 / AE-5)
+    "AttenuationError",
+    "AuthorityGraph",
+    "Macaroon",
 ]
 
 
 # The forced-path adoption surface (governed tools). Imported last: govern.py
 # consumes DecisionOS (defined above) lazily, so there is no import cycle.
 from .govern import GovernanceRefused, Governor, current_actor, set_actor  # noqa: E402
+from .sealed import (  # noqa: E402
+    AdmissionError,
+    AdmissionOffice,
+    AdmissionTicket,
+    EvidenceRecord,
+    SealedBreach,
+    SealedRefused,
+    SealedRuntime,
+    poison,
+    tri_state_legitimacy,
+)
+
+__all__ += [
+    "AdmissionError",
+    "AdmissionOffice",
+    "AdmissionTicket",
+    "EvidenceRecord",
+    "SealedBreach",
+    "SealedRefused",
+    "SealedRuntime",
+    "poison",
+    "tri_state_legitimacy",
+]
 
 
 @dataclass
@@ -114,6 +143,22 @@ class DecisionOS:
         # The executor OWNS the audit write now (HB-3): it records exactly one
         # entry per execute() — executed or refused — so no effect runs unlogged.
         self.executor = Executor(self.kernel.public_key_hex(), self.log)
+
+    def grant(self, actor: str, capability: str) -> None:
+        self.kernel.grant(actor, capability)
+
+    def revoke(self, actor: str, capability: str) -> None:
+        self.kernel.revoke(actor, capability)
+
+    def delegate(
+        self,
+        parent: str,
+        child: str,
+        tools: list[str],
+        *,
+        expires_at: datetime | None = None,
+    ) -> Macaroon:
+        return self.kernel.delegate(parent, child, tools, expires_at=expires_at)
 
     def handle(
         self,
@@ -145,4 +190,8 @@ class DecisionOS:
             output = self.executor.execute(action, result, tools)   # Gate 2 + audit + effect
             return Outcome(decision["verdict"], True, output)
         except ExecutionRefused as e:
-            return Outcome(decision["verdict"], False, refused_reason=str(e))
+            # Surface the decision's reason (veto text) alongside the mechanical
+            # PEP refusal — same discipline as AE-10 audit fidelity.
+            why = decision.get("reason") or ""
+            refused = f"{why} [refused: {e}]" if why else str(e)
+            return Outcome(decision["verdict"], False, refused_reason=refused)

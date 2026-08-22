@@ -132,10 +132,14 @@ def as_decision(out: dict[str, Any] | str, action: dict[str, Any]) -> dict[str, 
     return d
 
 
-# The ONLY keys an evaluator may contribute to the composed decision. Everything
-# else — token_id, capability, token_expires_at, action_binding, issued_by,
-# transformed_payload, containment — is the kernel's to state, and is stripped.
-EVALUATOR_CONTRIBUTABLE = frozenset({"verdict", "reason", "action_ref"})
+# Keys an evaluator may contribute. M5: legitimacy_digest + axiom_ids ride into
+# the signed decision so AuthGate/PEP cannot detach authority from the moral
+# ruling that permitted composition. Everything else (token_id, capability,
+# token_expires_at, action_binding, issued_by, transformed_payload, containment)
+# remains the kernel's alone.
+EVALUATOR_CONTRIBUTABLE = frozenset(
+    {"verdict", "reason", "action_ref", "legitimacy_digest", "axiom_ids"}
+)
 
 
 def sanitize(d: dict[str, Any]) -> dict[str, Any]:
