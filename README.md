@@ -9,9 +9,9 @@ into one `handle()` call.**
 > system in the classic sense. It's a research-*oriented* architecture: its
 > advantages over existing tools are not yet proven by independent evaluation.
 
-> **Legitimacy ⊥ Authority — the system is BOTH layers, and both are the theory
-> made executable.** This is not "just a legitimacy filter" and not "just neutral
-> plumbing." Two independent layers, both derived from the theory:
+> **Legitimacy ⊥ Authority — two enforced layers of one engineered moral order**
+> (see root [`POSITIONING.md`](../POSITIONING.md)). This is not "just a legitimacy
+> filter" and not "just neutral plumbing." Two independent layers:
 > - **FDK — legitimacy** (ownership / consent / verifier): *should this happen at
 >   all?* A **DENY-only** gate. Runs **first**.
 > - **AuthGate — authority** (delegated machine property rights: tool-permission +
@@ -68,15 +68,19 @@ Both are closed; `tests/test_redteam_composition.py` and `tests/test_redteam_rou
 keep the attacks as permanent regressions. The lesson is recorded because it will
 recur: **"fail-closed for the variant I happened to write" is not fail-closed.**
 
-Five gaps remain open and are named as `test_break*` rather than hidden: no evaluator
-timeout, `BaseException` is deliberately not caught, and the sequential pipeline still
-diverges from the composer when a policy raises.
+Former deliberate gaps are closed: evaluator timeout (default 1s, configurable),
+plugin-raised `BaseException` composes as DENY, and `LegitimacyAuthorityPipeline`
+delegates to the composed legitimacy evaluator so reasons converge. AE-10 (audit
+fidelity on composed DENY) remains closed. Residual intentional limits (obligation
+union, thread-timeout orphans) stay documented in the red-team regression file.
 
-**Conformance:** 8 pass / 0 fail / 2 not-applicable against the Authority Enforcement
-Profile (`contracts-spec/conformance/`). The two N/A are attenuation and temporal
-attenuation — there is no delegation graph here. That is a gap, not a pass.
+**Conformance:** 10 pass / 0 fail / 0 not-applicable against the Authority Enforcement
+Profile (`contracts-spec/conformance/`). AE-4/AE-5 are satisfied by a macaroon-inspired
+attenuation graph (`decision_os_min/attenuation.py`) — caveats can only narrow; child
+expiry is clamped to the parent. Not a full Macaroon/Biscuit implementation; the
+profile's governing property only.
 
-167 tests, ruff and mypy clean.
+191 tests, ruff and mypy clean.
 
 ## How it flows
 
