@@ -295,7 +295,7 @@ def test_d3e_stronger_getattribute_body_still_architectural(runtime):
     rt, _tools, _ex, effects = runtime
     cell = rt._bodies["deploy_ranking"]  # noqa: SLF001
     raw = object.__getattribute__(cell, "_fn")
-    assert raw(model="via-getattr") == "via-getattr"
+    assert raw(model="via-getattr") == "deployed:via-getattr"
     assert effects["deploy_ranking"] == ["via-getattr"]
 
 
