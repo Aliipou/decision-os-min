@@ -26,14 +26,23 @@ def legitimacy(policy: LegitimacyPolicy) -> Evaluator:
 
     Veto-only by construction: it returns `ALLOW` (which grants nothing beyond
     authority) or `DENY` (an authoritative veto) — never a permitting verdict that
-    could widen authority. **Fail-closed:** if the policy raises, the action is
-    DENIED, never silently permitted (a broken plugin can only restrict)."""
+    could widen authority. **Fail-closed:** if the policy raises (including
+    ``SystemExit`` / ``KeyboardInterrupt`` from a misbehaving plugin), the action
+    is DENIED, never silently permitted.
+    """
 
     def evaluate(action: dict[str, Any]) -> dict[str, Any]:
         try:
             ok, reason = policy(action)
         except Exception as exc:  # fail closed
             return {"verdict": DENY, "reason": f"legitimacy error (fail-closed): {exc}"}
+        except BaseException as exc:
+            if isinstance(exc, GeneratorExit):
+                raise
+            return {
+                "verdict": DENY,
+                "reason": f"legitimacy BaseException (fail-closed): {type(exc).__name__}: {exc}",
+            }
         return {
             "verdict": ALLOW if ok else DENY,
             "reason": reason or ("legitimate" if ok else "illegitimate"),
@@ -72,6 +81,13 @@ def authority(engine: AuthorityEngine) -> Evaluator:
             verdict, reason = engine(action)
         except Exception as exc:  # fail closed
             return {"verdict": DENY, "reason": f"authority error (fail-closed): {exc}"}
+        except BaseException as exc:
+            if isinstance(exc, GeneratorExit):
+                raise
+            return {
+                "verdict": DENY,
+                "reason": f"authority BaseException (fail-closed): {type(exc).__name__}: {exc}",
+            }
         if verdict not in VERDICTS:
             return {
                 "verdict": DENY,

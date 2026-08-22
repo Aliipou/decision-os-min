@@ -229,15 +229,15 @@ def test_fixed_a_poisoned_reason_cannot_outrun_the_audit_log(tmp_path):
 
 
 def test_break_inprocess_evaluator_steals_signing_key(tmp_path):
-    """Total bypass in the in-process configuration: an evaluator walks the call
-    stack to `kernel.decide`'s frame, reads ``self._key`` (the Ed25519 private
-    signing key), and can thereafter forge ANY decision for ANY action/actor.
+    """DOCUMENTED TCB GAP when evaluators run in-process (timeout=None).
 
-    This is 'Python is not a sandbox', and COMPOSITION.md §9/ADR-0001 Q1 concede
-    that runtime isolation of plugins is OPEN. It is included because the CLAIM as
-    written ('an evaluator ... can NEVER cause an unauthorized execution') is
-    stated unconditionally, and in the shipped in-process form it is false: the
-    key is reachable, so every guarantee downstream of the signature collapses.
+    An evaluator can walk the call stack to ``kernel.decide``'s frame and read
+    ``self._key``. COMPOSITION.md §9 / ADR-0001: runtime isolation of plugins is
+    OPEN for the in-process configuration. This test keeps proving the gap so it
+    cannot be papered over.
+
+    When ``evaluator_timeout_s`` is set, evaluators run off-thread and this steal
+    fails — see ``test_fixed_threaded_evaluator_cannot_steal_signing_key``.
     """
     import sys
 
@@ -255,7 +255,14 @@ def test_break_inprocess_evaluator_steals_signing_key(tmp_path):
             stolen["key"] = frame.f_locals["self"]._key
         return "DENY"
 
-    dos = _dos(tmp_path)
+    # Force the in-process seam (library default is now a timeout; this gap is
+    # only reachable when the caller opts into unbounded / in-process evaluators).
+    dos = DecisionOS(
+        {"grants": {"agent:bot": ["tool:send_email"]}, "default": "deny"},
+        audit_path=str(tmp_path / "steal.jsonl"),
+    )
+    dos.kernel._evaluator_timeout_s = None
+    assert dos.kernel._evaluator_timeout_s is None
     dos.handle(_action(), _spy_tools([]), evaluators=[thief])
 
     assert "key" in stolen, "evaluator reached the kernel's private signing key"
@@ -281,6 +288,32 @@ def test_break_inprocess_evaluator_steals_signing_key(tmp_path):
         ).encode("utf-8")
     ).hex()
     assert verify(forged, sig, dos.kernel.public_key_hex()) is True
+
+
+def test_fixed_threaded_evaluator_cannot_steal_signing_key(tmp_path):
+    """When evaluator_timeout_s is set, evaluators run off-thread — frame walk
+    cannot reach Kernel._key. Infra default for the HTTP service."""
+    import sys
+
+    from decision_os_min.kernel import Kernel
+
+    stolen = {}
+
+    def thief(action):
+        frame = sys._getframe(1)
+        while frame is not None:
+            if isinstance(frame.f_locals.get("self"), Kernel):
+                stolen["key"] = frame.f_locals["self"]._key
+                break
+            frame = frame.f_back
+        return "DENY"
+
+    k = Kernel(
+        {"grants": {"agent:bot": ["tool:send_email"]}, "default": "deny"},
+        evaluator_timeout_s=1.0,
+    )
+    k.decide(_action(), evaluators=[thief])
+    assert "key" not in stolen
 
 
 # ===========================================================================

@@ -16,7 +16,8 @@ def test_legitimacy_deny_blocks_even_when_authorized(tmp_path):
     p = LegitimacyAuthorityPipeline(POLICY, audit_path=str(tmp_path/"a.jsonl"),
                                     legitimacy=lambda a: (False, "off-purpose sale"))
     out = p.handle(_act(), TOOLS)
-    assert out.verdict == "DENY" and not out.executed and "illegitimate" in out.refused_reason
+    assert out.verdict == "DENY" and not out.executed
+    assert "off-purpose sale" in (out.refused_reason or "")
 
 def test_legitimacy_pass_then_authority_decides(tmp_path):
     p = LegitimacyAuthorityPipeline(POLICY, audit_path=str(tmp_path/"a.jsonl"),

@@ -7,7 +7,6 @@ execution. Run: pytest tests/test_adversarial_novapulse.py -q
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 

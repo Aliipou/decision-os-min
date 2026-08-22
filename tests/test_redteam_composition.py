@@ -39,18 +39,16 @@ The invariants each test bears on:
     I5 order-independent — evaluator order is semantically empty
     I6 convergence       — the bricks' equivalence claims hold on EVERY cell
 
-STILL BROKEN — deliberately left asserting the vulnerable behaviour, keeping their
-`test_break*` names, because the fix did not touch them:
+STILL BROKEN — none remaining in this file. Prior gaps closed:
 
-    test_break6  — a composed DENY is audited without the vetoing reason and with
-                   tool="". The fix changed composition, not the audit path.
-    test_break7a — a policy raising BaseException (SystemExit/KeyboardInterrupt)
-                   propagates out of `decide()`. The kernel catches `Exception`
-                   only, on purpose: process shutdown is not a verdict.
-    test_break7c — there is no timeout in the evaluator seam; a slow evaluator
-                   simply blocks and is then honoured.
-    test_break8/8b — the sequential pipeline and the composed form still diverge
-                   when the policy raises, and on the audited refusal reason.
+    test_fixed7a — evaluator-raised SystemExit/KeyboardInterrupt composes as DENY
+    test_fixed7c — evaluator timeout composes as DENY (Kernel ``evaluator_timeout_s``, default 1s)
+    test_fixed8/8b — LegitimacyAuthorityPipeline is composition; reasons converge
+
+CLOSED since 2026-08 (AE-10 audit fidelity):
+
+    test_fixed6 — a composed DENY is audited with the vetoing evaluator's reason
+                  and the refused tool name (was test_break6).
 """
 
 from __future__ import annotations
@@ -356,7 +354,9 @@ def test_fixed2_plugin_limit_cannot_rewrite_the_executed_payload(tmp_path):
 
     out = _dos(tmp_path).handle(action, _spy_tools(sink), evaluators=[evil_limit])
     assert out.executed is False and out.verdict == LIMIT
-    assert out.refused_reason == "LIMIT without a transformed_payload: refusing"
+    # AE-10: Outcome.refused_reason carries the decision reason AND the PEP refusal.
+    assert "LIMIT without a transformed_payload" in (out.refused_reason or "")
+    assert "minimized (allegedly)" in (out.refused_reason or "")
     assert sink == []  # the attacker's payload never reached a tool
     # The original payload is untouched, as it always was.
     assert action["payload"] == {"to": "x@ok.test", "amount": 1}
@@ -415,7 +415,7 @@ def test_fixed3_plugin_contain_can_no_longer_deliver_the_redacted_secret(tmp_pat
         evaluators=[evil_contain],
     )
     assert out.executed is False and out.verdict == CONTAIN
-    assert out.refused_reason == "contained: 'send_email' not in allowlist []"
+    assert "not in allowlist" in (out.refused_reason or "")
     # No tool ran at all, so the SSN authority redacted was never delivered.
     assert sink == []
     # Read that refusal reason carefully: the empty allowlist is the plugin's
@@ -446,7 +446,7 @@ def test_fixed3b_plugin_cannot_choose_its_own_containment_allowlist(tmp_path):
         ],
     )
     assert out.executed is False
-    assert out.refused_reason == "contained: 'send_email' not in allowlist []"
+    assert "contained: 'send_email' not in allowlist []" in (out.refused_reason or "")
     assert sink == []
 
 
@@ -580,22 +580,13 @@ def test_fixed5_external_limit_without_a_payload_is_refused(tmp_path):
         evaluators=[authority(lambda a: (LIMIT, "minimize"))],
     )
     assert out.executed is False and out.verdict == LIMIT
-    assert out.refused_reason == "LIMIT without a transformed_payload: refusing"
+    assert "LIMIT without a transformed_payload" in (out.refused_reason or "")
     assert sink == []  # no empty-payload call, no substituted effect
 
 
 # =============================================================================
-# BREAK #6 — STILL BROKEN. NOT closed by R1/R2/R3; the fix did not touch the audit
-# path, and this test deliberately keeps its `test_break*` name and its
-# vulnerable-behaviour assertions so the gap stays visible.
-#
-# The audit does not record WHO vetoed or WHAT was refused. execute.execute()
-# writes `reason=f"refused: {e}"` on the refusal path, throwing away
-# decision["reason"], and derives `tool` from decision["capability"] — which the
-# kernel only sets on a PERMITTING verdict. So every composed veto is logged as
-# tool="" with the generic PEP message. R1 arguably makes this WORSE in one narrow
-# respect: `reason` is now the only channel an evaluator has left, and it is
-# exactly the field the refusal audit discards.
+# BREAK #6 — CLOSED (AE-10). Renamed to test_fixed6_*; kept here as the permanent
+# regression for the audit-fidelity gap that discarded the vetoing reason.
 # =============================================================================
 def test_fixed6_a_composed_deny_is_audited_with_its_reason_and_tool(tmp_path):
     """CLOSED (conformance requirement AE-10, audit fidelity). The refusal path used
@@ -628,28 +619,22 @@ def test_fixed6_a_composed_deny_is_audited_with_its_reason_and_tool(tmp_path):
 
 
 # =============================================================================
-# BREAK #7 — fail-closed gaps in the evaluator seam (I4). Only 7b is closed; 7a
-# and 7c SURVIVE and keep their `test_break*` names.
+# FIXED #7 — fail-closed gaps in the evaluator seam (I4). 7a/7b/7c all closed.
 # =============================================================================
-def test_break7a_baseexception_is_not_caught_by_the_legitimacy_adapter(tmp_path):
-    """STILL BROKEN — and deliberately so, which is why this stays a `test_break*`.
-
-    `legitimacy()` catches Exception, and the kernel's own guard also catches
-    `Exception` only. A policy raising BaseException (KeyboardInterrupt / SystemExit
-    / a cancelled async task) still propagates out of kernel.decide() instead of
-    composing as DENY. The blue-team fix made that choice explicitly (kernel.py: "a
-    raising evaluator DENIES ... BaseException is deliberately NOT caught: that is
-    process shutdown, not a verdict"), so this is a documented divergence from I4's
-    prose rather than an oversight. It is fail-closed in effect — the exception
-    escapes BEFORE any mint, so no token exists — but a caller that treats an
-    exception as "no decision" rather than "deny" would still be wrong, and I4's
-    wording ("errors ... is composed as DENY") remains inaccurate for this case."""
+def test_fixed7a_baseexception_from_evaluator_composes_as_deny(tmp_path):
+    """CLOSED (I4). An evaluator raising SystemExit used to abort decide() before
+    a DENY was composed. Plugin-raised BaseException (except GeneratorExit) is now
+    fail-closed → DENY, no token."""
 
     def boom(a):
         raise SystemExit("policy called sys.exit")
 
-    with pytest.raises(SystemExit):
-        Kernel(POLICY).decide(_action(), evaluators=[legitimacy(boom)])
+    result = Kernel(POLICY).decide(_action(), evaluators=[legitimacy(boom)])
+    assert result["decision"]["verdict"] == DENY
+    assert result["token"] is None
+    assert "BaseException" in result["decision"]["reason"] or "SystemExit" in result[
+        "decision"
+    ]["reason"]
 
 
 def test_fixed7b_non_dict_non_str_evaluator_return_denies(tmp_path):
@@ -673,53 +658,48 @@ def test_fixed7b_non_dict_non_str_evaluator_return_denies(tmp_path):
     assert "malformed evaluator output" in int_result["decision"]["reason"]
 
 
-def test_break7c_no_timeout_a_slow_evaluator_just_blocks(tmp_path):
-    """STILL BROKEN — untouched by R1/R2/R3, so it keeps its `test_break*` name.
-
-    I4 says an evaluator that 'times out' composes as DENY. There is no timeout
-    anywhere in the seam: decide() blocks for as long as the plugin wants and then
-    honours its verdict. (0.4s here; an unbounded hang is the same code path.)"""
+def test_fixed7c_slow_evaluator_times_out_as_deny(tmp_path):
+    """CLOSED (I4 timeout). An unbounded evaluator used to block and then ALLOW.
+    Kernel default timeout denies instead."""
 
     def slow(a):
         time.sleep(0.4)
         return ALLOW
 
     t0 = time.monotonic()
-    result = Kernel(POLICY).decide(_action(), evaluators=[slow])
+    result = Kernel(POLICY, evaluator_timeout_s=0.05).decide(
+        _action(), evaluators=[slow]
+    )
     elapsed = time.monotonic() - t0
-    assert elapsed >= 0.4, "exploit failed — something bounded the evaluator"
-    assert result["decision"]["verdict"] == ALLOW  # not DENY
+    assert elapsed < 0.35, "timeout did not bound the evaluator"
+    assert result["decision"]["verdict"] == DENY
+    assert result["token"] is None
+    assert "timeout" in result["decision"]["reason"]
 
 
 # =============================================================================
-# BREAK #8 — brick #1 convergence (I6) does not hold on every cell.
-# test_evaluators.py samples 4 cells of (legit × authority). A 5th cell — the
-# legitimacy policy FAILING — diverges: the sequential pipeline propagates the
-# exception (no effect, but no decision and no audit entry either), while the
-# composed form denies cleanly. The two are not interchangeable.
+# FIXED #8 — pipeline is composition (paradigm.py delegates to DecisionOS.handle
+# with the legitimacy evaluator); exception and refusal-reason cells converge.
 # =============================================================================
-def test_break8_pipeline_and_composer_diverge_when_the_policy_raises(tmp_path):
+def test_fixed8_pipeline_and_composer_agree_when_the_policy_raises(tmp_path):
     def boom(a):
         raise RuntimeError("policy crashed")
 
     pipe = LegitimacyAuthorityPipeline(
         POLICY, audit_path=str(tmp_path / "pipe.jsonl"), legitimacy=boom
     )
-    with pytest.raises(RuntimeError):
-        pipe.handle(_action(), _spy_tools([]))
+    r_pipe = pipe.handle(_action(), _spy_tools([]))
+    assert r_pipe.verdict == DENY and not r_pipe.executed
 
     composed = _dos(tmp_path, "comp.jsonl").handle(
         _action(), _spy_tools([]), evaluators=[legitimacy(boom)]
     )
     assert composed.verdict == DENY and not composed.executed
-    # Same policy, same action, two different outcomes => not equivalent.
+    assert "policy crashed" in (r_pipe.refused_reason or "")
+    assert "policy crashed" in (composed.refused_reason or "")
 
 
-def test_break8b_pipeline_and_composer_diverge_on_the_refusal_reason(tmp_path):
-    """Even on a clean veto the two forms are only equal on (verdict, executed,
-    output) — the audited reason differs, so 'the sequential stage is redundant
-    and deletable' loses the vetoing reason from the log."""
-
+def test_fixed8b_pipeline_and_composer_agree_on_the_refusal_reason(tmp_path):
     def legit(a):
         return (False, "recipient domain blocked")
 
@@ -731,10 +711,10 @@ def test_break8b_pipeline_and_composer_diverge_on_the_refusal_reason(tmp_path):
     dos = _dos(tmp_path, "c.jsonl")
     r_comp = dos.handle(_action(), _spy_tools([]), evaluators=[legitimacy(legit)])
 
-    assert r_seq.verdict == r_comp.verdict and not r_seq.executed and not r_comp.executed
-    assert r_seq.refused_reason != r_comp.refused_reason
+    assert r_seq.verdict == r_comp.verdict == DENY
+    assert not r_seq.executed and not r_comp.executed
     assert "recipient domain blocked" in (r_seq.refused_reason or "")
-    assert "recipient domain blocked" not in (r_comp.refused_reason or "")
+    assert "recipient domain blocked" in (r_comp.refused_reason or "")
 
 
 # =============================================================================
