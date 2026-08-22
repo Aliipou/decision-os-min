@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -31,7 +30,7 @@ from .audit import HashLog
 from .compose import ALLOW, DEFER, DENY, PERMITTING, Evaluator
 from .execute import ExecutionRefused, Executor
 from .kernel import Kernel, verify
-from .spentstore import SpentStore
+from .spentstore import SpentStore, SpentStoreUnavailable
 
 
 class SealedBreach(RuntimeError):
@@ -83,15 +82,25 @@ class AdmissionTicket:
 
 
 class AdmissionOffice:
-    """Signed, single-use admission tickets. ``set_actor`` is not identity here."""
+    """Signed, single-use admission tickets backed by the shared SpentStore.
 
-    def __init__(self, *, seed_material: str, ttl_seconds: int = 300) -> None:
+    Replay is enforced by the same durable store as decision tokens (prefix
+    ``adm:``), so two SealedRuntime replicas sharing a store cannot both consume
+    one ticket. Fail-closed if the store is unreachable.
+    """
+
+    def __init__(
+        self,
+        *,
+        seed_material: str,
+        spent_store: SpentStore,
+        ttl_seconds: int = 300,
+    ) -> None:
         seed = hashlib.sha256(seed_material.encode()).digest()
         self._key = Ed25519PrivateKey.from_private_bytes(seed)
         self._pub: Ed25519PublicKey = self._key.public_key()
         self._ttl = ttl_seconds
-        self._spent: set[str] = set()
-        self._lock = threading.Lock()
+        self._spent = spent_store
 
     def issue(self, actor: str, stakeholder: str) -> AdmissionTicket:
         body = {
@@ -110,7 +119,7 @@ class AdmissionOffice:
         )
 
     def consume(self, ticket: AdmissionTicket | dict[str, str]) -> tuple[str, str]:
-        """Verify + single-spend. Returns (actor, stakeholder)."""
+        """Verify + single-spend via SpentStore. Returns (actor, stakeholder)."""
         d = ticket.as_dict() if isinstance(ticket, AdmissionTicket) else dict(ticket)
         sig_hex = d.get("signature", "")
         body = {k: d[k] for k in ("actor", "stakeholder", "expires_at", "nonce")}
@@ -122,11 +131,15 @@ class AdmissionOffice:
             raise
         except Exception as exc:
             raise AdmissionError(f"admission ticket invalid: {exc}") from exc
-        nonce = body["nonce"]
-        with self._lock:
-            if nonce in self._spent:
-                raise AdmissionError("admission ticket already spent (replay)")
-            self._spent.add(nonce)
+        key = f"adm:{body['nonce']}"
+        try:
+            first = self._spent.try_spend(key)
+        except SpentStoreUnavailable as exc:
+            raise AdmissionError(
+                f"admission spent-store unavailable (fail-closed): {exc}"
+            ) from exc
+        if not first:
+            raise AdmissionError("admission ticket already spent (replay)")
         return body["actor"], body["stakeholder"]
 
 
@@ -194,7 +207,6 @@ class SealedRuntime:
     audit_path: str
     legitimacy: Callable[[dict[str, Any]], tuple[bool | None, str, tuple[str, ...]]]
     spent_store: SpentStore
-    require_legitimacy_binding: bool = True
     kernel: Kernel = field(init=False)
     log: HashLog = field(init=False)
     executor: Executor = field(init=False)
@@ -217,7 +229,10 @@ class SealedRuntime:
             self.log,
             spent_store=self.spent_store,
         )
-        self.admission = AdmissionOffice(seed_material=self.kernel.public_key_hex())
+        self.admission = AdmissionOffice(
+            seed_material=self.kernel.public_key_hex(),
+            spent_store=self.spent_store,
+        )
         self._leg_eval = tri_state_legitimacy(self.legitimacy)
 
     def register_agent(self, agent_id: str, *, actor: str, stakeholder: str) -> None:
@@ -324,27 +339,26 @@ class SealedRuntime:
         result = self.kernel.decide(action, evaluators=[self._leg_eval])
         decision = result["decision"]
 
-        if self.require_legitimacy_binding:
-            if decision.get("verdict") in PERMITTING and not decision.get("legitimacy_binding"):
-                raise SealedRefused(
-                    DENY,
-                    "M5: permitting decision missing legitimacy_binding",
-                    {"decision": decision},
+        # M5 is mandatory on the sealed surface — no opt-out.
+        if decision.get("verdict") in PERMITTING and not decision.get("legitimacy_binding"):
+            raise SealedRefused(
+                DENY,
+                "M5: permitting decision missing legitimacy_binding",
+                {"decision": decision},
+            )
+        if decision.get("legitimacy_binding"):
+            expected = hashlib.sha256(
+                _canon(
+                    {
+                        "action_binding": decision.get("action_binding"),
+                        "legitimacy_digest": decision.get("legitimacy_digest", ""),
+                        "axiom_ids": decision.get("axiom_ids", []),
+                        "verdict": decision.get("verdict"),
+                    }
                 )
-            # Integrity: binding must match recomputation inputs present on decision.
-            if decision.get("legitimacy_binding"):
-                expected = hashlib.sha256(
-                    _canon(
-                        {
-                            "action_binding": decision.get("action_binding"),
-                            "legitimacy_digest": decision.get("legitimacy_digest", ""),
-                            "axiom_ids": decision.get("axiom_ids", []),
-                            "verdict": decision.get("verdict"),
-                        }
-                    )
-                ).hexdigest()
-                if expected != decision["legitimacy_binding"]:
-                    raise SealedRefused(DENY, "M5: legitimacy_binding mismatch", {})
+            ).hexdigest()
+            if expected != decision["legitimacy_binding"]:
+                raise SealedRefused(DENY, "M5: legitimacy_binding mismatch", {})
 
         # Stale/substituting legitimacy: PEP already binds action_fingerprint.
         # Extra: refuse if signature does not verify (forged decision inject).

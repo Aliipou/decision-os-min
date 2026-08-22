@@ -345,7 +345,6 @@ def test_d5b_ticket_replay(runtime):
 def test_d5c_ticket_substitution_stakeholder(runtime):
     rt, _, _, effects = runtime
     t = rt.admit("owner-1")
-    # Mutate stakeholder field while keeping signature → verify must fail
     forged = AdmissionTicket(
         actor=t.actor,
         stakeholder="regulator",
@@ -363,6 +362,40 @@ def test_d5c_ticket_substitution_stakeholder(runtime):
             resource="ranking_model",
         )
     assert effects["deploy_ranking"] == []
+
+
+def test_d5d_admission_replay_across_runtimes_shared_store(tmp_path):
+    """Admission spend must use shared SpentStore, not a process-local set."""
+    store = InMemorySpentStore()
+
+    def legit(action):
+        return (True, "ok", ())
+
+    def mk(path):
+        rt = SealedRuntime(
+            {
+                "grants": {"agent:owner": ["tool:audit_export"]},
+                "purpose_bindings": {"ops": ["audit"], "public": ["audit"]},
+                "default": "deny",
+            },
+            audit_path=str(path),
+            legitimacy=legit,
+            spent_store=store,
+        )
+        rt.register_agent("owner-1", actor="agent:owner", stakeholder="owner")
+        rt.seal({"audit_export": lambda *, scope="public": f"audit:{scope}"})
+        return rt
+
+    mk(tmp_path / "a.jsonl")
+    mk(tmp_path / "b.jsonl")
+    from decision_os_min.sealed import AdmissionOffice
+
+    office_a = AdmissionOffice(seed_material="shared-seed", spent_store=store)
+    office_b = AdmissionOffice(seed_material="shared-seed", spent_store=store)
+    t = office_a.issue("agent:owner", "owner")
+    assert office_a.consume(t) == ("agent:owner", "owner")
+    with pytest.raises(AdmissionError, match="spent|replay"):
+        office_b.consume(t)
 
 
 def test_d6_capability_substitution_action_b(runtime):

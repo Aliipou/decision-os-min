@@ -29,6 +29,7 @@ mandatory interceptor), not more library axioms.
 | Registry mutation (`_tools` / `_bodies`) | PASS |
 | Actor spoofing (`set_actor`) | PASS (tickets required) |
 | Ticket forgery / replay / substitution | PASS |
+| Admission spend across shared store | PASS |
 | Capability substitution | PASS |
 | Decision token replay | PASS |
 | Confused deputy | PASS |
