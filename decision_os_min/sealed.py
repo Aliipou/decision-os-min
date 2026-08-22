@@ -132,8 +132,9 @@ class _BodyCell:
         object.__setattr__(self, "_name", name)
 
     def __call__(self, *_a: Any, **_k: Any) -> Any:
+        name = object.__getattribute__(self, "_name")
         raise SealedBreach(
-            f"body cell {self._name!r} is not callable; use SealedRuntime.invoke()"
+            f"body cell {name!r} is not callable; use SealedRuntime.invoke()"
         )
 
     def __setattr__(self, key: str, value: Any) -> None:
