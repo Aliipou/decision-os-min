@@ -419,12 +419,11 @@ def test_d5d_admission_replay_across_runtimes_shared_store(tmp_path):
 
 
 def test_d6_capability_substitution_action_b(runtime):
-    """Reuse decision for action A to run action B — PEP binding."""
+    """Reuse decision for action A to run action B — PEP binding (bare Executor)."""
     rt, _, _, effects = runtime
-    from decision_os_min.execute import ExecutionRefused
+    from decision_os_min.audit import HashLog
+    from decision_os_min.execute import ExecutionRefused, Executor
 
-    t = rt.admit("owner-1")
-    # Craft via kernel directly after admission consume — use fresh admit
     t = rt.admit("owner-1")
     actor, _ = rt.admission.consume(t)
     action_a = {
@@ -438,19 +437,42 @@ def test_d6_capability_substitution_action_b(runtime):
     }
     action_b = dict(action_a)
     action_b["payload"] = {"scope": "secrets"}
-    action_b["nonce"] = "cap-a"
-    result = rt.kernel.decide(action_a, evaluators=[rt._leg_eval])
+    result = rt._kernel.decide(action_a, evaluators=[rt._leg_eval])  # noqa: SLF001
+    ex = Executor(rt.kernel.public_key_hex(), HashLog(rt.log._path.parent / "d6.jsonl"))  # noqa: SLF001
     with pytest.raises(ExecutionRefused):
-        rt.executor.execute(action_b, result, {"audit_export": lambda p: effects["audit_export"].append(p) or "x"})
+        ex.execute(action_b, result, {"audit_export": lambda p: effects["audit_export"].append(p) or "x"})
+    assert effects["audit_export"] == []
+
+
+def test_d6b_sealed_kernel_decide_closed(runtime):
+    rt, _, _, effects = runtime
+    with pytest.raises(SealedBreach, match="decide is closed"):
+        rt.kernel.decide({"actor": "agent:owner", "tool": "audit_export", "capability": "tool:audit_export",
+                          "action_purpose": "audit", "data_labels": ["ops"], "payload": {}, "nonce": "x"})
+    assert effects["deploy_ranking"] == []
+
+
+def test_d6c_sealed_executor_unarmed_refuses(runtime):
+    rt, _, _, effects = runtime
+    from decision_os_min.execute import ExecutionRefused
+
+    with pytest.raises(ExecutionRefused, match="not armed"):
+        rt.executor.execute(
+            {"actor": "agent:owner", "tool": "audit_export", "capability": "tool:audit_export",
+             "nonce": "z", "payload": {}, "action_purpose": "audit", "data_labels": ["ops"]},
+            {"decision": {"verdict": "ALLOW", "action_binding": "0" * 64}, "signature": ""},
+            {"audit_export": lambda p: effects["audit_export"].append("x") or "x"},
+        )
     assert effects["audit_export"] == []
 
 
 def test_d7_decision_token_replay(runtime):
-    rt, _, _, effects = runtime
-    from decision_os_min.execute import ExecutionRefused
+    rt, _, _, _effects = runtime
+    from decision_os_min.audit import HashLog
+    from decision_os_min.execute import ExecutionRefused, Executor
 
     t = rt.admit("owner-1")
-    actor, stake = rt.admission.consume(t)
+    actor, _stake = rt.admission.consume(t)
     action = {
         "actor": actor,
         "tool": "audit_export",
@@ -460,16 +482,17 @@ def test_d7_decision_token_replay(runtime):
         "payload": {"scope": "public"},
         "nonce": "replay-1",
     }
-    result = rt.kernel.decide(action, evaluators=[rt._leg_eval])
+    result = rt._kernel.decide(action, evaluators=[rt._leg_eval])  # noqa: SLF001
     ran: list = []
 
     def fn(p):
         ran.append(p)
         return "audit:public"
 
-    assert rt.executor.execute(action, result, {"audit_export": fn}) == "audit:public"
+    ex = Executor(rt.kernel.public_key_hex(), HashLog(rt.log._path.parent / "d7.jsonl"))  # noqa: SLF001
+    assert ex.execute(action, result, {"audit_export": fn}) == "audit:public"
     with pytest.raises(ExecutionRefused):
-        rt.executor.execute(action, result, {"audit_export": fn})
+        ex.execute(action, result, {"audit_export": fn})
     assert ran == [{"scope": "public"}]
 
 def test_d8_confused_deputy_operator_as_owner_payload(runtime):
@@ -519,14 +542,18 @@ def test_d10_stale_fdk_verdict_on_new_action(runtime):
         "payload": {"model": "ok"},
         "nonce": "stale-a",
     }
-    result = rt.kernel.decide(a, evaluators=[rt._leg_eval])
+    result = rt._kernel.decide(a, evaluators=[rt._leg_eval])  # noqa: SLF001
     assert result["decision"].get("legitimacy_binding")
     b = dict(a)
     b["payload"] = {"model": "evil", "dark_pattern": True}
     b["nonce"] = "stale-a"
     ran: list = []
+    from decision_os_min.audit import HashLog
+    from decision_os_min.execute import Executor
+
+    ex = Executor(rt.kernel.public_key_hex(), HashLog(rt.log._path.parent / "d10.jsonl"))  # noqa: SLF001
     with pytest.raises(ExecutionRefused):
-        rt.executor.execute(b, result, {"deploy_ranking": lambda p: ran.append(p) or "x"})
+        ex.execute(b, result, {"deploy_ranking": lambda p: ran.append(p) or "x"})
     assert ran == []
     assert effects["deploy_ranking"] == []
 
@@ -545,12 +572,16 @@ def test_d11_strip_legitimacy_binding_breaks_signature(runtime):
         "payload": {"scope": "public"},
         "nonce": "m5-1",
     }
-    result = rt.kernel.decide(a, evaluators=[rt._leg_eval])
+    result = rt._kernel.decide(a, evaluators=[rt._leg_eval])  # noqa: SLF001
     assert "legitimacy_binding" in result["decision"]
     tampered = copy.deepcopy(result)
     tampered["decision"]["legitimacy_binding"] = "0" * 64
+    from decision_os_min.audit import HashLog
+    from decision_os_min.execute import Executor
+
+    ex = Executor(rt.kernel.public_key_hex(), HashLog(rt.log._path.parent / "d11.jsonl"))  # noqa: SLF001
     with pytest.raises(ExecutionRefused):
-        rt.executor.execute(a, tampered, {"audit_export": lambda p: effects["audit_export"].append(p) or "x"})
+        ex.execute(a, tampered, {"audit_export": lambda p: effects["audit_export"].append(p) or "x"})
     assert effects["audit_export"] == []
 
 def test_d12_replica_shared_spent_blocks_double_spend(tmp_path, monkeypatch):
@@ -588,7 +619,7 @@ def test_d12_replica_shared_spent_blocks_double_spend(tmp_path, monkeypatch):
         "payload": {"scope": "public"},
         "nonce": "rep-1",
     }
-    result = rt.kernel.decide(action, evaluators=[rt._leg_eval])
+    result = rt._kernel.decide(action, evaluators=[rt._leg_eval])  # noqa: SLF001
     pub = rt.kernel.public_key_hex()
     ex1 = Executor(pub, HashLog(tmp_path / "e1.jsonl"), spent_store=store)
     ex2 = Executor(pub, HashLog(tmp_path / "e2.jsonl"), spent_store=store)

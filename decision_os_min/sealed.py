@@ -49,6 +49,54 @@ class SealedRefused(RuntimeError):
         self.evidence = evidence or {}
 
 
+class _SealedExecutor(Executor):
+    """Executor that refuses execute() unless armed once by SealedRuntime.invoke."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._arm: tuple[str, dict[str, Callable[[dict[str, Any]], Any]]] | None = None
+
+    def arm(self, action_binding: str, tools: dict[str, Callable[[dict[str, Any]], Any]]) -> None:
+        self._arm = (action_binding, dict(tools))
+
+    def execute(
+        self,
+        action: dict[str, Any],
+        result: dict[str, Any],
+        tools: dict[str, Callable[[dict[str, Any]], Any]],
+    ) -> Any:
+        arm = self._arm
+        self._arm = None
+        if arm is None:
+            raise ExecutionRefused("sealed executor: not armed by invoke (fail-closed)")
+        binding, expected = arm
+        decision = result.get("decision") if isinstance(result, dict) else None
+        if not isinstance(decision, dict) or decision.get("action_binding") != binding:
+            raise ExecutionRefused("sealed executor: arm binding mismatch")
+        if list(tools.keys()) != list(expected.keys()):
+            raise ExecutionRefused("sealed executor: tool map not armed")
+        for name, fn in expected.items():
+            if tools.get(name) is not fn:
+                raise ExecutionRefused("sealed executor: tool callable substitution")
+        return super().execute(action, result, tools)
+
+
+class _KernelFacade:
+    """Public kernel handle: identity only. decide() is closed on the sealed surface."""
+
+    def __init__(self, kernel: Kernel) -> None:
+        self._kernel = kernel
+
+    def public_key_hex(self) -> str:
+        return self._kernel.public_key_hex()
+
+    def decide(self, *args: Any, **kwargs: Any) -> Any:
+        raise SealedBreach("SealedRuntime.kernel.decide is closed; use invoke()")
+
+    def __getattr__(self, name: str) -> Any:
+        raise SealedBreach(f"SealedRuntime.kernel.{name} is closed; use invoke()")
+
+
 def _canon(obj: Any) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str).encode()
 
@@ -231,9 +279,9 @@ class SealedRuntime:
     audit_path: str
     legitimacy: Callable[[dict[str, Any]], tuple[bool | None, str, tuple[str, ...]]]
     spent_store: SpentStore
-    kernel: Kernel = field(init=False)
+    kernel: _KernelFacade = field(init=False)
     log: HashLog = field(init=False)
-    executor: Executor = field(init=False)
+    executor: _SealedExecutor = field(init=False)
     admission: AdmissionOffice = field(init=False)
     evidence: list[EvidenceRecord] = field(default_factory=list)
     # Public-facing table: always poisoned / inert callables (never live effects).
@@ -244,17 +292,19 @@ class SealedRuntime:
     _agent_meta: dict[str, dict[str, str]] = field(default_factory=dict)
     _frozen: bool = False
     _source_registry: dict[str, Callable[..., Any]] | None = None
+    _kernel: Kernel = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.kernel = Kernel(self.policy)
+        self._kernel = Kernel(self.policy)
+        self.kernel = _KernelFacade(self._kernel)
         self.log = HashLog(self.audit_path)
-        self.executor = Executor(
-            self.kernel.public_key_hex(),
+        self.executor = _SealedExecutor(
+            self._kernel.public_key_hex(),
             self.log,
             spent_store=self.spent_store,
         )
         self.admission = AdmissionOffice(
-            seed_material=self.kernel.public_key_hex(),
+            seed_material=self._kernel.public_key_hex(),
             spent_store=self.spent_store,
         )
         self._leg_eval = tri_state_legitimacy(self.legitimacy)
@@ -309,8 +359,8 @@ class SealedRuntime:
             raise SealedBreach("_tools slot is not poisoned; execution refused")
         return body
 
-    def _pep_closure(self, tool: str, body: Callable[..., Any]) -> Callable[[dict[str, Any]], Any]:
-        """One-shot wrapper handed only to Executor for this invoke()."""
+    def _pep_closure(self, body: Callable[..., Any]) -> Callable[[dict[str, Any]], Any]:
+        """Fresh PEP-only wrapper; not stored on the runtime."""
 
         def effect(payload: dict[str, Any], _body: Callable[..., Any] = body) -> Any:
             return _body(**payload)
@@ -338,7 +388,7 @@ class SealedRuntime:
             raise AdmissionError("ticket stakeholder substitution refused")
 
         effect_body = self._assert_registry_integrity(tool)
-        pep_tool = self._pep_closure(tool, effect_body)
+        pep_tool = self._pep_closure(effect_body)
         cap = capability or f"tool:{tool}"
         purpose = intent
         if purpose in ("deploy", "price", "regulate"):
@@ -347,7 +397,6 @@ class SealedRuntime:
             labels = ["ops", "public"]
         else:
             labels = ["ops"]
-        cap = capability or f"tool:{tool}"
         action = {
             "actor": actor,
             "tool": tool,
@@ -362,8 +411,8 @@ class SealedRuntime:
             "resource": resource,
         }
 
-        auth_preview = self.kernel.decide(dict(action), evaluators=None)
-        result = self.kernel.decide(action, evaluators=[self._leg_eval])
+        auth_preview = self._kernel.decide(dict(action), evaluators=None)
+        result = self._kernel.decide(action, evaluators=[self._leg_eval])
         decision = result["decision"]
 
         # M5 is mandatory on the sealed surface — no opt-out.
@@ -389,11 +438,13 @@ class SealedRuntime:
 
         # Stale/substituting legitimacy: PEP already binds action_fingerprint.
         # Extra: refuse if signature does not verify (forged decision inject).
-        if not verify(decision, result.get("signature", ""), self.kernel.public_key_hex()):
+        if not verify(decision, result.get("signature", ""), self._kernel.public_key_hex()):
             raise SealedRefused(DENY, "decision signature invalid", {})
 
+        tools_map = {tool: pep_tool}
+        self.executor.arm(str(decision.get("action_binding") or ""), tools_map)
         try:
-            output = self.executor.execute(action, result, {tool: pep_tool})
+            output = self.executor.execute(action, result, tools_map)
         except ExecutionRefused as exc:
             rec = self._emit(
                 action, agent_id, intent, resource, auth_preview, decision, result, False, None, f"PEP:{exc}"
