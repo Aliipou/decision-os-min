@@ -47,3 +47,6 @@ testpaths = ["tests"]
 pythonpath = ["."]
 # Windows: default %TEMP%\pytest-of-* can hit WinError 5 (access denied).
 addopts = "--basetemp=.pytest-basetemp"
+markers = [
+  "tm_a: OS-isolation / DirectEffect(Agent)=∅ under declared sandbox profile",
+]

@@ -35,35 +35,27 @@ The agent no longer owns the execution path for host-registered effects.
 
 ## Evidence
 
-| Property | Status | Evidence |
-|---|---|---|
-| Host-registered effect ⇒ Admission∧Legitimacy∧Authority∧PEP | **PASS** | `tests/test_hosted_agent_plane.py` h1/h2 |
-| Agent has no tool/adapter handles | **PASS** | h3/h4 |
-| IPC-only path to host effects | **PASS** | h2/h4 |
-| DirectEffect(Agent)=∅ for ambient OS (socket/open/subprocess) | **PARTIAL** | h3 records WROTE/CONNECTED without OS jail — needs seccomp/container |
+| Property | Threat model | Status | Evidence |
+|---|---|---|---|
+| Host-registered effect ⇒ chain | **TM-H** | **PASS** | `tests/test_hosted_agent_plane.py` |
+| Agent has no tool/adapter handles | **TM-H** | **PASS** | h3/h4 |
+| IPC-only path to host effects | **TM-H** | **PASS** | h2/h4 |
+| DirectEffect(Agent)=∅ (FS/net/exec) | **TM-A** | **Linux/Docker suite** — local without Docker = skip | `sandbox/`, `tests/test_os_isolation.py` |
+
+See [`THREAT_MODELS.md`](THREAT_MODELS.md). Do not mix TM-H PASS with TM-A.
 
 ## Components
 
 | # | Item | Status |
 |---|---|---|
-| 1 | AgentHost | done — `decision_os_min/host.py` |
-| 2 | Untrusted agent subprocess | done — IPC client + probe |
-| 3 | Mandatory FDK | done — via SealedRuntime |
-| 4 | Mandatory AuthGate | done — via SealedRuntime |
-| 5 | Mandatory PEP | done — arm-gated executor |
-| 6 | Effect adapters on host only | done |
-| 7 | IPC boundary | done — line JSON stdio |
-| 8 | OS sandbox | **not done** — next milestone |
-| 9 | End-to-end audit | done |
-| 10 | Destructor tests | done |
+| 1–7 | Host + IPC + FDK/AuthGate/PEP/adapters | done |
+| 8 | OS sandbox `agent-noambient-v1` | Linux/Docker CI — Windows local = skip |
+| 9–10 | Audit + destructor tests (TM-H) | done |
 
-## Next milestone (OS isolation)
+## Next milestone
 
-Until DirectEffect probes are BLOCKED by the OS/container:
-
-- do not upgrade claim from PARTIAL ambient to PASS
-- Linux: seccomp / landlock / network namespace
-- Windows: honest PARTIAL or Job Object / AppContainer research
+Break TM-A with real ambient attacks; harden `agent-noambient-v1` until they stay BLOCKED.
+Only then revisit native TCB (maybe Rust) for Host compromise resistance.
 
 ## Ladder
 

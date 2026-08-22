@@ -24,12 +24,34 @@ jobs:
       - name: Types (mypy)
         run: mypy decision_os_min
       - name: Tests (pytest)
-        run: pytest -q
+        run: pytest -q --ignore=tests/test_os_isolation.py
+        env:
+          AUTHGATE_BACKEND: python
+
+  tm-a-isolation:
+    name: TM-A OS isolation (agent-noambient-v1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Pull probe image
+        run: docker pull python:3.12-slim-bookworm
+      - name: Run TM-A sandbox probes
+        run: bash sandbox/run_tm_a_probes.sh
+      - name: Pytest TM-A markers
+        run: pytest -q -m tm_a tests/test_os_isolation.py
         env:
           AUTHGATE_BACKEND: python
 
   docker:
     runs-on: ubuntu-latest
+    environment:
+      name: production-smoke
+      url: https://github.com/${{ github.repository }}/deployments/production-smoke
     steps:
       - uses: actions/checkout@v4
       - name: Build image

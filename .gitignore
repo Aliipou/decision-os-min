@@ -5,6 +5,7 @@ build/
 dist/
 .pytest_cache/
 .pytest-basetemp/
+.pytest-tmp/
 .ruff_cache/
 .mypy_cache/
 .venv/
