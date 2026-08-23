@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from decision_os_min.host import AgentHost, Intent, spawn_host
+from decision_os_min.host import AgentHost, Intent, locked_agent_docker_cmd, spawn_host
 from decision_os_min.spentstore import InMemorySpentStore
 
 POLICY = {
@@ -130,3 +130,25 @@ def test_h4_agent_cannot_import_live_host_adapters_across_ipc():
         assert r["ok"] is True
     finally:
         client.close()
+
+
+def test_h5_locked_agent_command_uses_declared_tm_a_boundary(tmp_path):
+    """Production callers get the same lock path exercised by TM-A probes."""
+    agent = tmp_path / "agent.py"
+    agent.write_text("print('agent')\n", encoding="utf-8")
+
+    cmd = locked_agent_docker_cmd(
+        agent,
+        image="agent:test",
+        seccomp="/profiles/noambient.json",
+        lock_script="/tcb/lock_and_run.py",
+    )
+
+    assert cmd[:3] == ["docker", "run", "--rm"]
+    assert "--read-only" in cmd
+    assert "--network=none" in cmd
+    assert "--cap-drop=ALL" in cmd
+    assert "--security-opt=no-new-privileges" in cmd
+    assert "--security-opt=seccomp=/profiles/noambient.json" in cmd
+    assert "agent:test" in cmd
+    assert cmd[-2:] == ["/lock_and_run.py", "/agent.py"]

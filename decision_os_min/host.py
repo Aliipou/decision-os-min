@@ -281,8 +281,16 @@ def locked_agent_docker_cmd(
     root = Path(__file__).resolve().parents[1]
     img = image or os.environ.get("AGENT_SANDBOX_IMAGE", "decision-os-agent:noambient-v1")
     agent = Path(agent_script).resolve()
-    lock = Path(lock_script) if lock_script else root / "sandbox" / "lock_and_run.py"
-    sc = Path(seccomp) if seccomp else root / "sandbox" / "seccomp-agent-noambient-v1.json"
+    lock = (
+        str(lock_script)
+        if lock_script is not None
+        else str(root / "sandbox" / "lock_and_run.py")
+    )
+    sc = (
+        str(seccomp)
+        if seccomp is not None
+        else str(root / "sandbox" / "seccomp-agent-noambient-v1.json")
+    )
     return [
         "docker",
         "run",
