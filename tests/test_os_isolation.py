@@ -9,11 +9,15 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
+
+from decision_os_min.host import AgentHost, authenticated_agent_docker_cmd
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "sandbox" / "tm_a_probe.py"
@@ -21,6 +25,8 @@ LOCK = ROOT / "sandbox" / "lock_and_run.py"
 SECCOMP = ROOT / "sandbox" / "seccomp-agent-noambient-v1.json"
 DOCKERFILE = ROOT / "sandbox" / "Dockerfile.agent"
 IMAGE = os.environ.get("AGENT_SANDBOX_IMAGE", "decision-os-agent:noambient-v1")
+AUTHENTICATED_AGENT = ROOT / "sandbox" / "authenticated_intent_agent.py"
+IPC_SECCOMP = ROOT / "sandbox" / "seccomp-agent-ipc-v1.json"
 
 _BLOCK = (
     "filesystem",
@@ -188,3 +194,105 @@ def test_destructor_unlocked_still_allows_process_and_wx():
     assert d["mmap_exec"] == "MAPPED"
     assert d["mprotect_exec"] == "EXEC_GRANTED"
     assert d["ptrace"] == "ATTACHED"
+
+
+@pytest.mark.tm_a
+def test_real_sandbox_authenticated_intent_reaches_external_governed_host(tmp_path):
+    """Linux/Docker proof: the inherited AF_UNIX FD is the sole agent effect path."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("native Linux bind-mounted Unix socket evidence")
+    if not _docker_ok():
+        if os.environ.get("CI"):
+            pytest.fail("Docker is required for Linux CI boundary evidence")
+        pytest.skip("docker not available")
+    _ensure_agent_image()
+
+    ipc_dir = tmp_path / "ipc"
+    ipc_dir.mkdir()
+    ipc_dir.chmod(0o777)
+    key_file = tmp_path / "agent.key"
+    key = os.urandom(32)
+    key_file.write_bytes(key)
+    key_file.chmod(0o644)
+    effect_file = tmp_path / "host-effects.jsonl"
+    socket_path = ipc_dir / "agent.sock"
+
+    def legitimacy(action):
+        if (action.get("payload") or {}).get("dark_pattern"):
+            return (False, "C1: deceptive", ("C1",))
+        return (True, "ok", ())
+
+    def deploy_ranking(*, model: str, **_kw):
+        with effect_file.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"model": model}) + "\n")
+        return f"deployed:{model}"
+
+    host = AgentHost(
+        policy={
+            "grants": {"agent:bot": ["tool:deploy_ranking"]},
+            "purpose_bindings": {"ops": ["deploy"]},
+            "default": "deny",
+        },
+        legitimacy=legitimacy,
+        adapters={"deploy_ranking": deploy_ranking},
+        audit_path=str(tmp_path / "host-audit.jsonl"),
+    )
+    host.register_agent("sandbox-bot", actor="agent:bot", stakeholder="ops")
+
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    socket_path.chmod(0o666)
+    listener.listen(1)
+    listener.settimeout(10)
+    server_errors: list[Exception] = []
+
+    def serve_external_host():
+        try:
+            conn, _ = listener.accept()
+            with conn:
+                host.serve_authenticated_socket(
+                    conn,
+                    agent_keys={"sandbox-bot": key},
+                    timeout_s=5,
+                )
+        except Exception as exc:
+            server_errors.append(exc)
+
+    server = threading.Thread(target=serve_external_host)
+    server.start()
+    cmd = authenticated_agent_docker_cmd(
+        AUTHENTICATED_AGENT,
+        socket_dir=ipc_dir,
+        key_file=key_file,
+        agent_id="sandbox-bot",
+        image=IMAGE,
+        seccomp=IPC_SECCOMP,
+        lock_script=LOCK,
+    )
+    run = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(ROOT),
+    )
+    server.join(timeout=10)
+    listener.close()
+
+    assert run.returncode == 0, f"stdout={run.stdout}\nstderr={run.stderr}"
+    assert "LOCKDOWN_FAIL" not in run.stderr
+    assert not server.is_alive()
+    assert server_errors == []
+    report = json.loads(run.stdout.strip().splitlines()[-1])
+    assert report["denied"]["ok"] is False
+    assert report["allowed"]["ok"] is True
+    assert report["allowed"]["output"] == "deployed:sandbox-v1"
+    assert report["replay"]["ok"] is False
+    assert "IPCReplayError" in report["replay"]["error"]
+    assert report["effect_handles"] is False
+    for destructor in ("filesystem", "network", "subprocess", "fork"):
+        assert report["direct_effects"][destructor].startswith("BLOCKED"), report
+    effects = [json.loads(line) for line in effect_file.read_text(encoding="utf-8").splitlines()]
+    assert effects == [{"model": "sandbox-v1"}]

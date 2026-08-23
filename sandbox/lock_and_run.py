@@ -3,7 +3,9 @@
 Lifecycle:
   runc execve(python)
   → warm-import stdlib extension modules (needs mmap PROT_EXEC once)
+  → optionally connect the one declared AF_UNIX AgentHost channel
   → NO_NEW_PRIVS + seccomp:
+       deny connect/connectat/bind (the inherited channel remains usable)
        deny execve/execveat
        deny fork/vfork/clone/clone3
        deny mmap/mprotect when PROT_EXEC (blocks later W^X + new .so)
@@ -19,6 +21,7 @@ import ctypes
 import ctypes.util
 import os
 import runpy
+import socket
 import sys
 
 PR_SET_NO_NEW_PRIVS = 38
@@ -26,6 +29,7 @@ SCMP_ACT_ALLOW = 0x7FFF0000
 SCMP_ACT_ERRNO = 0x00050000
 SCMP_CMP_MASKED_EQ = 7
 PROT_EXEC = 0x4
+AGENT_IPC_FD = 3
 
 # Modules an agent/probe may need; must load before W^X lock.
 _WARM_IMPORTS = (
@@ -39,6 +43,8 @@ _WARM_IMPORTS = (
     "mmap",
     "select",
     "errno",
+    "hashlib",
+    "hmac",
     "io",
     "threading",
     "time",
@@ -137,6 +143,12 @@ def install_process_lock() -> None:
             raise LockdownError(f"seccomp_rule_add_array({name!r}) failed")
 
     try:
+        for name in (b"connect", b"connectat", b"bind"):
+            try:
+                deny_simple(name)
+            except LockdownError:
+                if name in (b"connect", b"bind"):
+                    raise
         for name in (b"execve", b"execveat"):
             deny_simple(name)
         for name in (b"fork", b"vfork", b"clone"):
@@ -165,6 +177,20 @@ def install_process_lock() -> None:
         sec.seccomp_release(ctx)
 
 
+def connect_declared_ipc() -> socket.socket | None:
+    """Trusted bootstrap of the sole agent channel before connect is denied."""
+    path = os.environ.get("DECISION_OS_AGENT_SOCKET")
+    if not path:
+        return None
+
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(5.0)
+    conn.connect(path)
+    os.dup2(conn.fileno(), AGENT_IPC_FD, inheritable=True)
+    os.environ["DECISION_OS_AGENT_FD"] = str(AGENT_IPC_FD)
+    return conn
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
@@ -176,14 +202,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     warm_imports()
+    ipc: object | None = None
     try:
+        ipc = connect_declared_ipc()
         install_process_lock()
-    except LockdownError as exc:
+    except (LockdownError, OSError) as exc:
         print(f"LOCKDOWN_FAIL:{exc}", file=sys.stderr)
         return 3
 
     sys.argv = [target, *args[1:]]
     runpy.run_path(target, run_name="__main__")
+    del ipc
     return 0
 
 
