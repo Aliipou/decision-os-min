@@ -148,6 +148,7 @@ def test_h5_locked_agent_command_uses_declared_tm_a_boundary(tmp_path):
     assert "--read-only" in cmd
     assert "--network=none" in cmd
     assert "--cap-drop=ALL" in cmd
+    assert "--pids-limit=64" in cmd
     assert "--security-opt=no-new-privileges" in cmd
     assert "--security-opt=seccomp=/profiles/noambient.json" in cmd
     assert "agent:test" in cmd

@@ -22,7 +22,15 @@ SECCOMP = ROOT / "sandbox" / "seccomp-agent-noambient-v1.json"
 DOCKERFILE = ROOT / "sandbox" / "Dockerfile.agent"
 IMAGE = os.environ.get("AGENT_SANDBOX_IMAGE", "decision-os-agent:noambient-v1")
 
-_BLOCK = ("filesystem", "network", "subprocess", "mmap_exec", "mprotect_exec", "ptrace")
+_BLOCK = (
+    "filesystem",
+    "network",
+    "subprocess",
+    "fork",
+    "mmap_exec",
+    "mprotect_exec",
+    "ptrace",
+)
 
 
 def _docker_ok() -> bool:
@@ -72,6 +80,7 @@ def _run_locked_probe() -> tuple[int, str, str]:
         "--read-only",
         "--network=none",
         "--cap-drop=ALL",
+        "--pids-limit=64",
         "--security-opt=no-new-privileges",
         f"--security-opt=seccomp={SECCOMP}",
         "--tmpfs",
@@ -121,7 +130,7 @@ def test_tm_a_unsandboxed_probe_still_shows_ambient_risk(tmp_path):
 
 @pytest.mark.tm_a
 def test_tm_a_locked_blocks_fs_net_process_and_non_exec():
-    """Locked profile: FS/NET/subprocess + W^X + ptrace BLOCKED."""
+    """Locked profile: FS/NET/exec/fork + W^X + ptrace BLOCKED."""
     if not _docker_ok():
         pytest.skip("docker not available")
     for path in (PROBE, LOCK, SECCOMP, DOCKERFILE):
@@ -140,7 +149,7 @@ def test_tm_a_locked_blocks_fs_net_process_and_non_exec():
 
 @pytest.mark.tm_a
 def test_destructor_unlocked_still_allows_process_and_wx():
-    """Without lock_and_run, subprocess + W^X + ptrace still succeed."""
+    """Without lock_and_run, exec/fork + W^X + ptrace still succeed."""
     if not _docker_ok():
         pytest.skip("docker not available")
     _ensure_agent_image()
@@ -151,6 +160,7 @@ def test_destructor_unlocked_still_allows_process_and_wx():
         "--read-only",
         "--network=none",
         "--cap-drop=ALL",
+        "--pids-limit=64",
         "--security-opt=no-new-privileges",
         f"--security-opt=seccomp={SECCOMP}",
         "--tmpfs",
@@ -174,6 +184,7 @@ def test_destructor_unlocked_still_allows_process_and_wx():
     assert r.returncode == 0, r.stderr
     d = json.loads(r.stdout.strip().splitlines()[-1])["direct_effects"]
     assert d["subprocess"] == "RAN"
+    assert d["fork"] == "FORKED"
     assert d["mmap_exec"] == "MAPPED"
     assert d["mprotect_exec"] == "EXEC_GRANTED"
     assert d["ptrace"] == "ATTACHED"

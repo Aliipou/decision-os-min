@@ -32,7 +32,7 @@ no effect adapters                  AuthGate / decision kernel
 | Agent has no tool/adapter handles | **TM-H** | **PASS** | h3/h4 |
 | IPC-only path to host effects | **TM-H** | **PASS** | h2/h4 |
 | Durable FS write + outbound net + ambient creds | **TM-A-v1 FS/NET** | **PASS** | `tests/test_os_isolation.py` |
-| AgentCreatedProcess after `lock_and_run` | **TM-A process** | **PASS** | unlocked destructor still `RAN` |
+| AgentCreatedProcess after `lock_and_run` | **TM-A process** | **PASS** | unlocked exec=`RAN`, fork=`FORKED` |
 | W^X + ptrace after lock | **TM-A non-exec** | **PASS** | unlocked still `MAPPED`/`EXEC_GRANTED`/`ATTACHED` |
 | Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | breakout / Host / out-of-profile |
 

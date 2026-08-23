@@ -43,6 +43,17 @@ def try_direct_effects() -> dict[str, str]:
     except Exception as exc:
         out["subprocess"] = f"BLOCKED:{type(exc).__name__}"
 
+    # Fork without exec: a distinct process-creation bypass class. Blocking
+    # execve alone is insufficient because the child can continue Python code.
+    try:
+        pid = os.fork()
+        if pid == 0:
+            os._exit(0)
+        _, status = os.waitpid(pid, 0)
+        out["fork"] = "FORKED" if os.WIFEXITED(status) else f"STATUS:{status}"
+    except Exception as exc:
+        out["fork"] = f"BLOCKED:{type(exc).__name__}"
+
     leaked = [k for k in os.environ if k.startswith(("AWS_", "OPENAI_", "DECISION_OS_HOST_"))]
     out["credentials"] = f"LEAKED:{leaked}" if leaked else "ABSENT"
 

@@ -299,6 +299,7 @@ def locked_agent_docker_cmd(
         "--read-only",
         "--network=none",
         "--cap-drop=ALL",
+        "--pids-limit=64",
         "--security-opt=no-new-privileges",
         f"--security-opt=seccomp={sc}",
         "--tmpfs",

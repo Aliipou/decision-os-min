@@ -83,8 +83,9 @@ Untrusted: agent module / `tm_a_probe.py` body after handoff.
 `sandbox/lock_and_run.py` (warm imports → seccomp):
 
 ```text
-locked:   FS/NET/subprocess/mmap_exec/mprotect_exec/ptrace = BLOCKED*
-unlocked: subprocess=RAN, mmap_exec=MAPPED, mprotect_exec=EXEC_GRANTED, ptrace=ATTACHED
+locked:   FS/NET/subprocess/fork/mmap_exec/mprotect_exec/ptrace = BLOCKED*
+unlocked: subprocess=RAN, fork=FORKED, mmap_exec=MAPPED,
+          mprotect_exec=EXEC_GRANTED, ptrace=ATTACHED
 ```
 
 **Tradeoff:** after W^X lock, new native `.so` loads fail (must warm before lock).

@@ -5,6 +5,7 @@ Lifecycle:
   → warm-import stdlib extension modules (needs mmap PROT_EXEC once)
   → NO_NEW_PRIVS + seccomp:
        deny execve/execveat
+       deny fork/vfork/clone/clone3
        deny mmap/mprotect when PROT_EXEC (blocks later W^X + new .so)
        deny ptrace / process_vm_* / userfaultfd
   → runpy untrusted agent
@@ -138,6 +139,13 @@ def install_process_lock() -> None:
     try:
         for name in (b"execve", b"execveat"):
             deny_simple(name)
+        for name in (b"fork", b"vfork", b"clone"):
+            deny_simple(name)
+        try:
+            deny_simple(b"clone3")
+        except LockdownError:
+            # Older kernels/libseccomp may not know clone3.
+            pass
         for name in (b"mmap", b"mmap2", b"mprotect", b"pkey_mprotect"):
             try:
                 deny_prot_exec(name, 2)

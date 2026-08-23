@@ -20,6 +20,7 @@ OUT="$(docker run --rm \
   --read-only \
   --network=none \
   --cap-drop=ALL \
+  --pids-limit=64 \
   --security-opt=no-new-privileges \
   --security-opt="seccomp=$SECCOMP" \
   --tmpfs /tmp:rw,noexec,nosuid,size=8m \
@@ -36,7 +37,7 @@ import json, sys
 report = json.loads(sys.argv[1])
 d = report["direct_effects"]
 errors = []
-for key in ("filesystem", "network", "subprocess", "mmap_exec", "mprotect_exec", "ptrace"):
+for key in ("filesystem", "network", "subprocess", "fork", "mmap_exec", "mprotect_exec", "ptrace"):
     val = d.get(key, "")
     if not str(val).startswith("BLOCKED"):
         errors.append(f"{key}={val} (want BLOCKED*)")
@@ -45,5 +46,5 @@ if d.get("credentials") != "ABSENT":
 if errors:
     print("TM-A FAIL:", "; ".join(errors), file=sys.stderr)
     sys.exit(1)
-print("TM-A lock PASS: FS+NET+process+W^X+ptrace blocked")
+print("TM-A lock PASS: FS+NET+exec+fork+W^X+ptrace blocked")
 PY

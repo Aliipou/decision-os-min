@@ -28,15 +28,16 @@ DirectEffect(Agent) = ∅
 | Slice | Meaning | Status |
 |---|---|---|
 | **TM-A-v1 FS/NET** | Durable FS write + outbound net + ambient product creds | **PASS** |
-| **AgentCreatedProcess** | `subprocess` / `execve` after `lock_and_run` | **PASS** |
+| **AgentCreatedProcess** | `execve` + `fork/vfork/clone/clone3` after `lock_and_run` | **PASS** |
 | **Non-exec W^X / ptrace** | `mmap`/`mprotect` PROT_EXEC + `ptrace` after lock | **PASS** |
 | **TM-A full** | Zero residual DirectEffect (breakout, Host, logic bombs) | **PARTIAL** |
 
 **Evidence (`tests/test_os_isolation.py`):**
 
 ```text
-locked:   FS/NET/subprocess/mmap_exec/mprotect_exec/ptrace = BLOCKED*
-unlocked: subprocess=RAN, mmap_exec=MAPPED, mprotect_exec=EXEC_GRANTED, ptrace=ATTACHED
+locked:   FS/NET/subprocess/fork/mmap_exec/mprotect_exec/ptrace = BLOCKED*
+unlocked: subprocess=RAN, fork=FORKED, mmap_exec=MAPPED,
+          mprotect_exec=EXEC_GRANTED, ptrace=ATTACHED
 ```
 
 **Lifecycle note:** warm-import stdlib `.so` **before** W^X lock; after lock, new executable mappings fail (intentional — blocks late native loads).
