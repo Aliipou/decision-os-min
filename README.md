@@ -403,6 +403,16 @@ logic changes, it is stabilized **here first**, then the enterprise track extend
 the *same* behavior with more capability (distribution, integration, research).
 The two versions must never fork their decision semantics.
 
+## Collaborators
+
+We are looking for people who will **attack** this runtime, not decorate it.
+
+Open roles: red-team (mint/run without a valid grant), Linux isolation (TM-A is PARTIAL), Hosted agent plane, Cedar/OPA adapters that cannot mint, attestation of inputs, honest docs.
+
+Call for collaborators: [discussions/3](https://github.com/Aliipou/decision-os-min/discussions/3) — comment there or open a PR with a test that fails on `main` today.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Do not write “no bypass anywhere.”
+
 ## External Rust research (not linked in this package)
 
 This repository is the self-contained **Python reference implementation**. It
