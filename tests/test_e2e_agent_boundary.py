@@ -144,6 +144,16 @@ def test_locked_agent_intent_ipc_reaches_only_governed_host_effect(tmp_path):
     assert str(evidence["direct_adapter"]).startswith("BLOCKED:")
 
     direct = evidence["direct_effects"]
-    for key in ("filesystem", "network", "exec", "fork", "mmap_exec", "mprotect_exec", "ptrace"):
+    for key in (
+        "filesystem",
+        "network",
+        "exec",
+        "fork",
+        "thread",
+        "mmap_exec",
+        "mprotect_exec",
+        "ptrace",
+    ):
         assert str(direct[key]).startswith("BLOCKED"), direct
+    assert str(direct["fd_limit"]).startswith("LIMITED:"), direct
     assert direct["credentials"] == "ABSENT"

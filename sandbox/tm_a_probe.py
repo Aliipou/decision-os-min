@@ -12,6 +12,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 
 
 def try_direct_effects() -> dict[str, str]:
@@ -53,6 +54,25 @@ def try_direct_effects() -> dict[str, str]:
         out["fork"] = "FORKED" if os.WIFEXITED(status) else f"STATUS:{status}"
     except Exception as exc:
         out["fork"] = f"BLOCKED:{type(exc).__name__}"
+
+    try:
+        thread = threading.Thread(target=lambda: None)
+        thread.start()
+        thread.join(timeout=1)
+        out["thread"] = "THREADED"
+    except Exception as exc:
+        out["thread"] = f"BLOCKED:{type(exc).__name__}"
+
+    handles = []
+    try:
+        for _ in range(256):
+            handles.append(open("/dev/null", "rb"))
+        out["fd_limit"] = "UNLIMITED:256"
+    except OSError:
+        out["fd_limit"] = f"LIMITED:{len(handles)}"
+    finally:
+        for handle in handles:
+            handle.close()
 
     leaked = [k for k in os.environ if k.startswith(("AWS_", "OPENAI_", "DECISION_OS_HOST_"))]
     out["credentials"] = f"LEAKED:{leaked}" if leaked else "ABSENT"

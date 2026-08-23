@@ -33,6 +33,8 @@ no effect adapters                  AuthGate / decision kernel
 | IPC-only path to host effects | **TM-H** | **PASS** | h2/h4 |
 | Durable FS write + outbound net + ambient creds | **TM-A-v1 FS/NET** | **PASS** | `tests/test_os_isolation.py` |
 | AgentCreatedProcess after `lock_and_run` | **TM-A process** | **PASS** | unlocked exec=`RAN`, fork=`FORKED` |
+| Thread / FD exhaustion probes | **TM-A resource slice** | **PASS** | thread blocked; FD loop limited |
+| Memory / CPU cgroups | **TM-A resource slice** | **CONFIGURED** | 128 MiB / 1 CPU; not full DoS proof |
 | W^X + ptrace after lock | **TM-A non-exec** | **PASS** | unlocked still `MAPPED`/`EXEC_GRANTED`/`ATTACHED` |
 | Locked agent → Intent IPC → governed host effect | **TM-H + named TM-A slices** | **PASS** | `tests/test_e2e_agent_boundary.py` |
 | Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | breakout / Host / out-of-profile |

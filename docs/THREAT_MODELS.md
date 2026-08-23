@@ -29,13 +29,16 @@ DirectEffect(Agent) = ∅
 |---|---|---|
 | **TM-A-v1 FS/NET** | Durable FS write + outbound net + ambient product creds | **PASS** |
 | **AgentCreatedProcess** | `execve` + `fork/vfork/clone/clone3` after `lock_and_run` | **PASS** |
+| **Thread / FD exhaustion** | clone-denial + `nofile=64` under declared profile | **PASS** for tested probes |
+| **Memory / CPU bounds** | Docker cgroups (`128m`, `1.0 CPU`) | **CONFIGURED**, not universal DoS proof |
 | **Non-exec W^X / ptrace** | `mmap`/`mprotect` PROT_EXEC + `ptrace` after lock | **PASS** |
 | **TM-A full** | Zero residual DirectEffect (breakout, Host, logic bombs) | **PARTIAL** |
 
 **Evidence (`tests/test_os_isolation.py`):**
 
 ```text
-locked:   FS/NET/subprocess/fork/mmap_exec/mprotect_exec/ptrace = BLOCKED*
+locked:   FS/NET/subprocess/fork/thread/mmap_exec/mprotect_exec/ptrace = BLOCKED*
+          fd_limit = LIMITED:*
 unlocked: subprocess=RAN, fork=FORKED, mmap_exec=MAPPED,
           mprotect_exec=EXEC_GRANTED, ptrace=ATTACHED
 ```

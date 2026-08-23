@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 
 
 def exchange(message: str) -> dict[str, object]:
@@ -52,6 +53,25 @@ def direct_effect_probes() -> dict[str, str]:
         out["fork"] = "FORKED"
     except Exception as exc:
         out["fork"] = f"BLOCKED:{type(exc).__name__}"
+
+    try:
+        thread = threading.Thread(target=lambda: None)
+        thread.start()
+        thread.join(timeout=1)
+        out["thread"] = "THREADED"
+    except Exception as exc:
+        out["thread"] = f"BLOCKED:{type(exc).__name__}"
+
+    handles = []
+    try:
+        for _ in range(256):
+            handles.append(open("/dev/null", "rb"))
+        out["fd_limit"] = "UNLIMITED:256"
+    except OSError:
+        out["fd_limit"] = f"LIMITED:{len(handles)}"
+    finally:
+        for handle in handles:
+            handle.close()
 
     try:
         page = mmap.mmap(

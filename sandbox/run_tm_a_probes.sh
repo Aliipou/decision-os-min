@@ -21,6 +21,9 @@ OUT="$(docker run --rm \
   --network=none \
   --cap-drop=ALL \
   --pids-limit=64 \
+  --memory=128m \
+  --cpus=1.0 \
+  --ulimit=nofile=64:64 \
   --security-opt=no-new-privileges \
   --security-opt="seccomp=$SECCOMP" \
   --tmpfs /tmp:rw,noexec,nosuid,size=8m \
@@ -37,14 +40,16 @@ import json, sys
 report = json.loads(sys.argv[1])
 d = report["direct_effects"]
 errors = []
-for key in ("filesystem", "network", "subprocess", "fork", "mmap_exec", "mprotect_exec", "ptrace"):
+for key in ("filesystem", "network", "subprocess", "fork", "thread", "mmap_exec", "mprotect_exec", "ptrace"):
     val = d.get(key, "")
     if not str(val).startswith("BLOCKED"):
         errors.append(f"{key}={val} (want BLOCKED*)")
 if d.get("credentials") != "ABSENT":
     errors.append(f"credentials={d.get('credentials')}")
+if not str(d.get("fd_limit", "")).startswith("LIMITED:"):
+    errors.append(f"fd_limit={d.get('fd_limit')} (want LIMITED:*)")
 if errors:
     print("TM-A FAIL:", "; ".join(errors), file=sys.stderr)
     sys.exit(1)
-print("TM-A lock PASS: FS+NET+exec+fork+W^X+ptrace blocked")
+print("TM-A lock PASS: FS+NET+process/thread+FD+W^X+ptrace constrained")
 PY

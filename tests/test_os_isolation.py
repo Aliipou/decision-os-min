@@ -27,6 +27,7 @@ _BLOCK = (
     "network",
     "subprocess",
     "fork",
+    "thread",
     "mmap_exec",
     "mprotect_exec",
     "ptrace",
@@ -81,6 +82,9 @@ def _run_locked_probe() -> tuple[int, str, str]:
         "--network=none",
         "--cap-drop=ALL",
         "--pids-limit=64",
+        "--memory=128m",
+        "--cpus=1.0",
+        "--ulimit=nofile=64:64",
         "--security-opt=no-new-privileges",
         f"--security-opt=seccomp={SECCOMP}",
         "--tmpfs",
@@ -144,6 +148,7 @@ def test_tm_a_locked_blocks_fs_net_process_and_non_exec():
     d = report["direct_effects"]
     for key in _BLOCK:
         assert str(d[key]).startswith("BLOCKED"), d
+    assert str(d["fd_limit"]).startswith("LIMITED:"), d
     assert d["credentials"] == "ABSENT", d
 
 
@@ -161,6 +166,9 @@ def test_destructor_unlocked_still_allows_process_and_wx():
         "--network=none",
         "--cap-drop=ALL",
         "--pids-limit=64",
+        "--memory=128m",
+        "--cpus=1.0",
+        "--ulimit=nofile=64:64",
         "--security-opt=no-new-privileges",
         f"--security-opt=seccomp={SECCOMP}",
         "--tmpfs",
@@ -185,6 +193,8 @@ def test_destructor_unlocked_still_allows_process_and_wx():
     d = json.loads(r.stdout.strip().splitlines()[-1])["direct_effects"]
     assert d["subprocess"] == "RAN"
     assert d["fork"] == "FORKED"
+    assert d["thread"] == "THREADED"
+    assert str(d["fd_limit"]).startswith("LIMITED:")
     assert d["mmap_exec"] == "MAPPED"
     assert d["mprotect_exec"] == "EXEC_GRANTED"
     assert d["ptrace"] == "ATTACHED"
