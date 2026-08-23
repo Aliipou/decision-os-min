@@ -114,6 +114,12 @@ Whether that opinionated integration is worth owning versus assembling mature pa
 is a real, open question — not one this project has yet earned the right to answer
 with external evidence.
 
+A pinned empirical check lives in [`bench/comparison/`](../bench/comparison/):
+Decision OS, official OPA, and official Cedar agree on six shared allow/deny
+cases. That is policy-conformance evidence, not a speed ranking and not a
+claim that Decision OS is a better policy language. MCP is measured as
+transport only.
+
 ## Prior art and convergence (validation *and* competition)
 
 The 2026 research direction is converging on exactly this problem: **"Agent Control

@@ -77,36 +77,82 @@ regressions in `tests/test_redteam_composition.py` and `tests/test_redteam_round
 AE-4/AE-5 use a macaroon-inspired attenuation graph (`decision_os_min/attenuation.py`)
 — caveats only narrow; child expiry clamped to parent.
 
+## Real OPA / Cedar / MCP comparison
+
+The comparable result is **policy conformance**, not speed. Decision OS, official
+OPA 1.19.1, and official Cedar CLI 4.12.0 encode equivalent grants, consent,
+purpose, and data-label rules in each native schema. MCP is a transport: it has
+no allow/deny verdict.
+
+Measured 2026-08-23 on Windows 10 (Intel Core i5-7300U), Python 3.13.2, after
+**10 discarded warmup iterations** per scenario and **50 timed iterations**
+(300 observations per scope):
+
+| Comparable policy decision | Shared-workload result | Measured boundary |
+|---|---:|---|
+| Decision OS built-in + legitimacy | **6/6 expected verdicts** | in-process policy meet only |
+| OPA 1.19.1 official image | **6/6 expected verdicts** | warm HTTP authorization query |
+| Cedar CLI 4.12.0 | **6/6 expected verdicts** | official CLI subprocess per request |
+
+Observed cost at each boundary — **not a ranking**; envelopes differ:
+
+| Scope | median / p95 | Why this is not comparable to the rows above it |
+|---|---:|---|
+| Decision OS policy-only | 0.016 / 0.031 ms | in-process Python; no I/O |
+| OPA HTTP query | 3.735 / 5.503 ms | localhost HTTP to a running server |
+| Cedar CLI authorize | 27.389 / 32.581 ms | includes process spawn; not the in-process `cedar-policy` library |
+| Decision OS `kernel.decide` | 1.011 / 1.256 ms | extra work: action bind + Ed25519 sign + token mint |
+| Decision OS full `handle` | 10.411 / 17.216 ms | extra work: sign + one-time PEP + callback + audit |
+| Official MCP TypeScript SDK 2.0.0 | 1.063 / 1.497 ms | **6/6 calls transported**; verdict N/A |
+
+Cedar and OPA remain stronger **policy languages**. Decision OS is the
+enforcement chain **after** a policy decision (signed bind, one-time PEP,
+audit). MCP's real handler was reached even for the four cases governance
+denies, which is why a separate enforcement layer is needed.
+
+Reproduce from pinned inputs and inspect the machine-readable result:
+[`bench/comparison/README.md`](bench/comparison/README.md) ·
+[`results/latest.json`](bench/comparison/results/latest.json).
+
 ## How it flows
 
 ```text
-        Action
-          │
-          ▼
-    DecisionOS.handle()
-          │
-          ▼
-      Identity  ── admission: is this a known principal?
-          │
-          ▼
-   FDK legitimacy ── DENY-only: should this happen at all? (may only refuse)
-          │
-          ▼
-   AuthGate authority ── Gate 1: capability + purpose, grant WITHIN legitimacy
-          │
-          ├── Decision (signed)
-          ├── Capability Token (one-time, action-bound)
-          │
-          ▼
-        Audit   ── Gate 3: durable, tamper-evident commit
-          │
-          ▼
-        Execute ── Gate 2: signature + action binding + token
+Untrusted Agent → Intent → AgentHost
+                              ├── Legitimacy PDP (DENY-only)
+                              └── Authority PDP (built-in / Cedar / OPA)
+                                          │
+                                  canonical verdict meet
+                                          │
+                                 Python reference Kernel
+                              action-bind + sign + mint once
+                                          │
+                                         PEP
+                                  verify + spend once
+                                          │
+                                    Audit + Effect
 ```
 
-The sequential helper evaluates identity admission → FDK legitimacy (DENY-only)
-→ AuthGate authority → PEP execution and audit. General evaluator composition is
-order-independent and deny-dominant; no ordering grants precedence over a denial.
+The selected Authority PDP is trusted for policy semantics, but never receives
+the signing key, spent store, PEP, adapters, or product credentials. Only the
+kernel can turn the composed verdict into executable authority. General
+legitimacy composition remains deny-dominant.
+
+### Replace the authority policy engine, not the execution boundary
+
+```python
+from decision_os_min import DecisionOS, OPAHTTPAuthorityPDP
+
+pdp = OPAHTTPAuthorityPDP(
+    "http://127.0.0.1:8181/v1/data/decision/allow",
+    policy_revision="bundle-sha256:...",
+)
+dos = DecisionOS({}, audit_path="audit.jsonl", authority_pdp=pdp)
+```
+
+`CedarCLIAuthorityPDP` supplies the equivalent official-CLI reference adapter.
+Built-in policy remains the dependency-free default. Cedar/OPA may grant or
+deny, but their output is stripped to a canonical verdict/reason; host-owned
+logic realizes LIMIT/CONTAIN, and the kernel remains the sole signer/minter.
 
 ## Govern your agent's tools — signed authorization + audit
 
@@ -238,7 +284,12 @@ Service environment:
 | `DECISION_OS_AUDIT` | no | Audit JSONL path |
 | `DECISION_OS_KEY_FILE` | recommended | Persistent Ed25519 private-key path |
 | `DECISION_OS_EVALUATOR_TIMEOUT_S` | no | Fail-closed evaluator timeout |
+| `DECISION_OS_AUTHORITY_PDP` | no | `builtin` (default), `opa`, or `cedar` |
+| `DECISION_OS_AUTHORITY_TIMEOUT_S` | no | Kernel-side fail-closed PDP timeout |
 | `DECISION_OS_EXPOSE_AUDIT` | no | Set `1` to expose the unauthenticated audit dump |
+
+OPA/Cedar-specific URL, policy-revision, binary, schema, and context-map
+variables are listed in [`INFRA.md`](INFRA.md).
 
 ## Product site and Vercel
 
@@ -260,11 +311,11 @@ do not expose signing keys or effect adapters to the static site.
 
 ## Extending it (plugins)
 
-The kernel is fixed; capability grows in plugins *around* it. A plugin is just a
-package that fits a **seam** (advisor, signer, policy-compiler, identity-verifier,
-tool-adapter) — and may advise/adapt/provide a backend, but **never decide or
-bypass the kernel**. See [`docs/PLUGIN_API.md`](docs/PLUGIN_API.md) for the stable
-contract. No plugin framework to learn — it's the library model.
+The kernel is fixed; capability grows at typed seams around it. Ordinary
+untrusted plugins may advise/adapt/provide a backend but never grant. A selected
+`AuthorityPDP` is a deliberate, separately labeled exception: it is trusted for
+policy semantics but still cannot sign, mint, spend, or bypass the PEP. See
+[`docs/PLUGIN_API.md`](docs/PLUGIN_API.md).
 
 ## Out of Scope (use the full Decision OS for these)
 
@@ -310,13 +361,11 @@ logic changes, it is stabilized **here first**, then the enterprise track extend
 the *same* behavior with more capability (distribution, integration, research).
 The two versions must never fork their decision semantics.
 
-## Trusted core (Rust)
+## External Rust research (not linked in this package)
 
-Both distributions of the Decision OS — this minimal one and the full
-[`decision-os-integration`](https://github.com/Aliipou/decision-os-integration)
-harness — **link the same two rustified trusted-core components** rather than
-carrying divergent copies. Minimal links them for compact embedding; the integration
-harness links them for the full multi-repo deployment.
+This repository is the self-contained **Python reference implementation**. It
+contains no Cargo manifest or Python↔Rust FFI binding today. Related repositories
+explore native trusted-core components:
 
 - **[authgate-kernel](https://github.com/Aliipou/authgate-kernel)** — the Rust
   *authority* TCB (the decision + capability core), with machine-checked models
@@ -324,9 +373,7 @@ harness links them for the full multi-repo deployment.
 - **[freedom-decision-kernel/rust](https://github.com/Aliipou/freedom-decision-kernel)**
   — the Rust *legitimacy-kernel* parity port.
 
-Honest scope: the Rust components are the **trusted computing base** (authority +
-the legitimacy-kernel primitive). The legitimacy **policy** — the injected rule
-that fills the DENY-only gate — stays Python: it is policy, not TCB, and is
-contained by the Rust authority backstop. This is **not** a full Rust rewrite of
-the system, and the Python reference implementation in this repo remains the
-primary, self-contained artifact.
+They are future parity/hardening targets, not evidence that this package
+currently executes a Rust kernel. Any eventual binding must pass differential
+decision, action-binding, minting, and PEP contract tests before changing that
+claim.

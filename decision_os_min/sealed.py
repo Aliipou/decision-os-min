@@ -27,6 +27,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from .audit import HashLog
+from .authority_pdp import AuthorityPDP
 from .compose import ALLOW, DEFER, DENY, PERMITTING, Evaluator
 from .execute import ExecutionRefused, Executor
 from .kernel import Kernel, verify
@@ -285,6 +286,8 @@ class SealedRuntime:
     audit_path: str
     legitimacy: Callable[[dict[str, Any]], tuple[bool | None, str, tuple[str, ...]]]
     spent_store: SpentStore
+    authority_pdp: AuthorityPDP | None = None
+    authority_timeout_s: float | None = 1.0
     kernel: _KernelFacade = field(init=False)
     log: HashLog = field(init=False)
     executor: _SealedExecutor = field(init=False)
@@ -301,7 +304,11 @@ class SealedRuntime:
     _kernel: Kernel = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._kernel = Kernel(self.policy)
+        self._kernel = Kernel(
+            self.policy,
+            authority_pdp=self.authority_pdp,
+            authority_timeout_s=self.authority_timeout_s,
+        )
         self.kernel = _KernelFacade(self._kernel)
         self.log = HashLog(self.audit_path)
         self.executor = _SealedExecutor(

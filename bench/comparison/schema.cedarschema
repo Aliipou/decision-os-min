@@ -1,0 +1,32 @@
+entity Agent;
+entity Effect;
+
+action "send_email" appliesTo {
+    principal: Agent,
+    resource: Effect,
+    context: {
+        consent: Bool,
+        purpose: String,
+        data_label: String
+    }
+};
+
+action "issue_payout" appliesTo {
+    principal: Agent,
+    resource: Effect,
+    context: {
+        consent: Bool,
+        purpose: String,
+        data_label: String
+    }
+};
+
+action "deploy_release" appliesTo {
+    principal: Agent,
+    resource: Effect,
+    context: {
+        consent: Bool,
+        purpose: String,
+        data_label: String
+    }
+};

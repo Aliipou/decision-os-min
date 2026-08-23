@@ -33,6 +33,17 @@ curl -s -X POST localhost:8080/v1/decide -H 'content-type: application/json' \
 | `DECISION_OS_AUDIT` | Audit JSONL path |
 | `DECISION_OS_KEY_FILE` | Persist signing key across restarts |
 | `DECISION_OS_EVALUATOR_TIMEOUT_S` | Fail-closed timeout for untrusted evaluators (`none` = off) |
+| `DECISION_OS_AUTHORITY_PDP` | `builtin` (default), `opa`, or `cedar` |
+| `DECISION_OS_AUTHORITY_TIMEOUT_S` | Kernel-side fail-closed PDP wall bound |
+| `DECISION_OS_OPA_DECISION_URL` | OPA data API endpoint (required for `opa`) |
+| `DECISION_OS_OPA_POLICY_REVISION` | Operator-supplied OPA bundle/version identifier |
+| `DECISION_OS_OPA_HEALTH_URL` | Optional OPA readiness endpoint |
+| `DECISION_OS_CEDAR_BIN` | Official Cedar CLI path (required for `cedar`) |
+| `DECISION_OS_CEDAR_POLICIES` | Cedar policy file |
+| `DECISION_OS_CEDAR_ENTITIES` | Cedar entities JSON |
+| `DECISION_OS_CEDAR_SCHEMA` | Optional Cedar schema |
+| `DECISION_OS_CEDAR_POLICY_REVISION` | Operator-supplied Cedar policy revision |
+| `DECISION_OS_CEDAR_CONTEXT_MAP` | JSON map from Cedar context fields to action paths |
 | `DECISION_OS_EXPOSE_AUDIT` | Set `1` to enable unauthenticated `GET /v1/audit` dump (off by default) |
 
 ## MCP loop

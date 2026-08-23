@@ -21,8 +21,10 @@ These checks do **not** make unqualified `DirectEffect(Agent)=∅` true. See
 ## Next validation work
 
 - [ ] Recruit 3–5 independent users and record installation/use failures
-- [ ] Run a shared-workload empirical comparison with real OPA, Cedar, and MCP
-  implementations (do not substitute a look-alike baseline)
+- [x] Run a shared-workload empirical comparison with real OPA, Cedar, and MCP
+  implementations — pinned harness, warmup discarded, policy conformance as
+  the comparable result, latency labeled by boundary (not a ranking) in
+  `bench/comparison/`
 - [ ] Commission an independent skeptical/security review
 - [ ] Publish a reproducible technical report from measured evidence
 

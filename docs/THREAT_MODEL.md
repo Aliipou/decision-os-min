@@ -36,6 +36,20 @@ We assume the attacker **does *not***:
 - Possess the kernel's Ed25519 private key.
 - Have code execution *inside the kernel process* (see residual risks).
 
+## Trusted policy providers
+
+When `DECISION_OS_AUTHORITY_PDP` selects Cedar or OPA, that provider is trusted
+for **policy semantics**: a compromised PDP can return ALLOW for an action that
+policy should deny. It is not trusted with executable authority. Its adapter
+receives an action copy and cannot access the signing key, token spend store,
+PEP, effect adapters, or product credentials. Returned identity/token/payload/
+containment fields are stripped before the kernel signs.
+
+Provider failures, malformed/off-lattice output, timeouts, oversized OPA
+responses, and Cedar execution/validation errors fail closed to DENY. This
+preserves one executable-authority path; it does not make a compromised policy
+source morally or operationally correct.
+
 ## Threats and how the design counters them
 
 ### 1. Forged or altered decision
@@ -70,8 +84,8 @@ mismatch")`. A signed authorization is welded to one action's content.
 **Threat.** The attacker resubmits a valid decision + token to run the effect a
 second time.
 
-**Counter.** Each token has a unique `token_id`. The executor keeps a `_spent`
-set; the first execution marks the token spent, and any re-use raises
+**Counter.** Each token has a unique `token_id`. The executor atomically records
+it through a `SpentStore`; the first execution marks the token spent, and any re-use raises
 `ExecutionRefused("token already spent (replay)")`. Tokens also carry a 30-second
 `expires_at` that the executor enforces. No token, or a non-permitting verdict,
 means no execution at all.

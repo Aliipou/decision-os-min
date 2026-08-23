@@ -24,6 +24,15 @@ from typing import Any
 from .advisors import simple_threat_advisor
 from .attenuation import AttenuationError, AuthorityGraph, Macaroon
 from .audit import HashLog
+from .authority_pdp import (
+    AuthorityMutationUnsupported,
+    AuthorityPDP,
+    AuthorityPDPError,
+    BuiltinAuthorityPDP,
+    CanonicalAuthorityResult,
+    CedarCLIAuthorityPDP,
+    OPAHTTPAuthorityPDP,
+)
 from .compose import Evaluator, compose, meet
 from .contracts import Action, AuditEntry, CapabilityToken, Decision, Verdict
 from .evaluators import LegitimacyPolicy, legitimacy
@@ -61,6 +70,13 @@ __all__ = [
     "SqliteSpentStore",
     "InMemorySpentStore",
     "SpentStoreUnavailable",
+    "AuthorityPDP",
+    "CanonicalAuthorityResult",
+    "BuiltinAuthorityPDP",
+    "OPAHTTPAuthorityPDP",
+    "CedarCLIAuthorityPDP",
+    "AuthorityPDPError",
+    "AuthorityMutationUnsupported",
     "UnfingerprintablePayload",
     "action_fingerprint",
     "verify",
@@ -143,8 +159,19 @@ class DecisionOS:
     """The whole system, composed. A single decision does not require standing up
     an OS — it is one method call."""
 
-    def __init__(self, policy: dict[str, Any], *, audit_path: str) -> None:
-        self.kernel = Kernel(policy)
+    def __init__(
+        self,
+        policy: dict[str, Any],
+        *,
+        audit_path: str,
+        authority_pdp: AuthorityPDP | None = None,
+        authority_timeout_s: float | None = 1.0,
+    ) -> None:
+        self.kernel = Kernel(
+            policy,
+            authority_pdp=authority_pdp,
+            authority_timeout_s=authority_timeout_s,
+        )
         self.log = HashLog(audit_path)
         # The executor OWNS the audit write now (HB-3): it records exactly one
         # entry per execute() — executed or refused — so no effect runs unlogged.

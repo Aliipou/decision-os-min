@@ -277,7 +277,7 @@ def test_fixed1f_the_signed_decision_carries_no_forged_token(tmp_path):
     CLOSED BY R1. The signature is still valid (the kernel does sign its refusals —
     that is correct), but there is nothing forged left inside it to authenticate:
     `sanitize` leaves only {verdict, reason, action_ref}, and the kernel adds
-    issued_by/action_binding itself."""
+    issued_by/action_binding plus the selected PDP's identity/revision itself."""
     from decision_os_min import verify
 
     kernel = Kernel(POLICY)
@@ -289,7 +289,16 @@ def test_fixed1f_the_signed_decision_carries_no_forged_token(tmp_path):
     assert d["verdict"] == DENY and d["verdict"] not in PERMITTING
     # An evaluator's contribution is bounded to what R1 permits, plus the kernel's
     # own stamps. No plugin-authored field can ride along under the signature.
-    assert set(d) == {"verdict", "reason", "action_ref", "issued_by", "action_binding"}
+    assert set(d) == {
+        "verdict",
+        "reason",
+        "action_ref",
+        "issued_by",
+        "action_binding",
+        "authority_provider",
+        "authority_policy_revision",
+    }
+    assert d["authority_provider"] == "builtin"
 
 
 def test_fixed1g_exploit_is_refused_through_the_forced_path_governor(tmp_path):

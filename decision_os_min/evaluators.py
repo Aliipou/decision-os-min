@@ -59,7 +59,7 @@ AuthorityEngine = Callable[[dict[str, Any]], "tuple[str, str]"]
 
 
 def authority(engine: AuthorityEngine) -> Evaluator:
-    """Adapt a **second, external authority engine** into a co-equal `Evaluator`.
+    """Adapt a second engine as a **veto-only** co-equal `Evaluator`.
 
     Convergence brick #2. Today an AuthGate deployment is a whole separate engine
     *stacked* after this one: engine A rules and MINTS A ONE-TIME TOKEN, then
@@ -69,7 +69,9 @@ def authority(engine: AuthorityEngine) -> Evaluator:
     external authority is folded in by `meet` BEFORE any mint, so its DENY costs
     nothing.
 
-    It is **veto-only like every other evaluator**: composition is deny-dominant,
+    This is not the replaceable trusted-PDP seam in ``authority_pdp.py``: an
+    ALLOW here cannot replace missing built-in authority. It is **veto-only like
+    every other evaluator**: composition is deny-dominant,
     so a permitting verdict from `engine` grants nothing this kernel's own
     authority ruling did not already grant — only this kernel mints. **Fail-closed
     twice over:** if the engine raises, DENY; if it returns a verdict outside the

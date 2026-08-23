@@ -8,13 +8,34 @@ build against.
 
 ## The one rule every plugin obeys
 
-> A plugin may **advise, adapt, or provide a backend**. It may **never decide,
+> An ordinary untrusted plugin may **advise, adapt, or provide a backend**. It may **never decide,
 > never mint a token, and never bypass the kernel.** Authority flows one way, down
 > from the single signer (see [AUTHORITY_MODEL.md](AUTHORITY_MODEL.md),
 > [DESIGN_PRINCIPLES.md](DESIGN_PRINCIPLES.md) §10).
 
-If a plugin could change what `(policy, action)` decides, it would be a second
-authority — and that is precisely what this architecture forbids.
+If an untrusted plugin could change what `(policy, action)` decides, it would be
+an undeclared policy authority — precisely what the architecture forbids.
+
+### Deliberate exception: trusted Authority PDP
+
+`decision_os_min.authority_pdp.AuthorityPDP` is **not** an ordinary plugin. The
+operator explicitly selects it as part of the policy trust base, so built-in
+policy, Cedar, or OPA may grant or deny. It still cannot sign, mint, spend,
+execute, or provide decision fields other than bounded verdict/reason:
+
+```python
+from decision_os_min import DecisionOS, OPAHTTPAuthorityPDP
+
+pdp = OPAHTTPAuthorityPDP(
+    "http://127.0.0.1:8181/v1/data/decision/allow",
+    policy_revision="bundle-sha256:...",
+)
+dos = DecisionOS({}, audit_path="audit.jsonl", authority_pdp=pdp)
+```
+
+The kernel records the provider/revision in its signed decision. Selecting a
+remote PDP therefore changes the **policy** trust base, but does not create a
+second execution authority.
 
 ## Stable seams
 
@@ -44,7 +65,8 @@ import them.
 | Seam | Signature | Role | Plugin |
 |---|---|---|---|
 | Signer (crypto-agility) | `sign(bytes)->bytes`, `public_key()->bytes` | swap Ed25519 for PQC/HSM | plugin-pqcrypto, plugin-tpm-hsm |
-| Policy compiler | `compile(source)->policy_dict` | author policy in OPA/Cedar, compile to kernel policy | plugin-policy |
+| Policy compiler | `compile(source)->policy_dict` | offline policy conversion into built-in policy | plugin-policy |
+| Trusted Authority PDP | `evaluate(action)->CanonicalAuthorityResult` | runtime built-in/Cedar/OPA policy verdict; explicitly trusted | `authority_pdp.py` |
 | Identity verifier | `actor_for(credential)->str\|None` | OAuth/OIDC/SPIFFE → actor | plugin-identity |
 | Tool adapter | `mcp_call_to_action(...)->action` | framework tool call → kernel action | plugin-mcp |
 

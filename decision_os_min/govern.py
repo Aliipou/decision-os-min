@@ -32,6 +32,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from .authority_pdp import AuthorityPDP
+
 # The calling agent's identity. Your app sets this per request/agent (admission);
 # the kernel decides authority from it. Default is a principal with no grants.
 current_actor: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -60,10 +62,17 @@ class Governor:
         *,
         audit_path: str,
         evaluators: list[Callable[[dict[str, Any]], dict[str, Any] | str]] | None = None,
+        authority_pdp: AuthorityPDP | None = None,
+        authority_timeout_s: float | None = 1.0,
     ) -> None:
         from decision_os_min import DecisionOS  # lazy: DecisionOS lives in __init__
 
-        self._dos = DecisionOS(policy, audit_path=audit_path)
+        self._dos = DecisionOS(
+            policy,
+            audit_path=audit_path,
+            authority_pdp=authority_pdp,
+            authority_timeout_s=authority_timeout_s,
+        )
         # Co-equal governance evaluators (e.g. an FDK legitimacy evaluator). Their
         # DENY is authoritative and cannot be overridden by authority — see
         # kernel.decide / COMPOSITION.md. Default: none (authority only).

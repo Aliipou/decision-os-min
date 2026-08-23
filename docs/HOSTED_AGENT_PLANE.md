@@ -19,7 +19,8 @@ Untrusted Agent Process              Trusted AgentHost Process
 ──────────────────────              ─────────────────────────
 Intent JSON only (IPC)   ──────►    Admission
 no tool callables                   FDK legitimacy (mandatory)
-no effect adapters                  AuthGate / decision kernel
+no effect adapters                  Authority PDP (built-in/Cedar/OPA)
+                                    Kernel (canonicalize/sign/mint only)
                                     PEP (arm-gated)
                                     Effect adapters (only here)
 ```
@@ -37,6 +38,7 @@ no effect adapters                  AuthGate / decision kernel
 | Memory / CPU cgroups | **TM-A resource slice** | **CONFIGURED** | 128 MiB / 1 CPU; not full DoS proof |
 | W^X + ptrace after lock | **TM-A non-exec** | **PASS** | unlocked still `MAPPED`/`EXEC_GRANTED`/`ATTACHED` |
 | Locked agent → Intent IPC → governed host effect | **TM-H + named TM-A slices** | **PASS** | `tests/test_e2e_agent_boundary.py` |
+| Replaceable PDP cannot mint/bypass/override legitimacy | **TM-H / policy trust base** | **PASS** | `tests/test_authority_pdp.py` |
 | Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | breakout / Host / out-of-profile |
 
 See [`THREAT_MODELS.md`](THREAT_MODELS.md), [`SUBPROCESS_BOUNDARY.md`](SUBPROCESS_BOUNDARY.md).

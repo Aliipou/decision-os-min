@@ -1,0 +1,62 @@
+[
+  {
+    "id": "support_reply_allowed",
+    "actor": "agent:support",
+    "tool": "send_email",
+    "capability": "tool:send_email",
+    "purpose": "support_reply",
+    "data_label": "customer_support",
+    "consent": true,
+    "expected": "ALLOW"
+  },
+  {
+    "id": "finance_refund_allowed",
+    "actor": "agent:finance",
+    "tool": "issue_payout",
+    "capability": "tool:issue_payout",
+    "purpose": "refund",
+    "data_label": "finance",
+    "consent": true,
+    "expected": "ALLOW"
+  },
+  {
+    "id": "missing_consent_denied",
+    "actor": "agent:support",
+    "tool": "send_email",
+    "capability": "tool:send_email",
+    "purpose": "support_reply",
+    "data_label": "customer_support",
+    "consent": false,
+    "expected": "DENY"
+  },
+  {
+    "id": "missing_capability_denied",
+    "actor": "agent:support",
+    "tool": "issue_payout",
+    "capability": "tool:issue_payout",
+    "purpose": "refund",
+    "data_label": "finance",
+    "consent": true,
+    "expected": "DENY"
+  },
+  {
+    "id": "purpose_mismatch_denied",
+    "actor": "agent:support",
+    "tool": "send_email",
+    "capability": "tool:send_email",
+    "purpose": "refund",
+    "data_label": "customer_support",
+    "consent": true,
+    "expected": "DENY"
+  },
+  {
+    "id": "unknown_actor_denied",
+    "actor": "agent:unknown",
+    "tool": "send_email",
+    "capability": "tool:send_email",
+    "purpose": "support_reply",
+    "data_label": "customer_support",
+    "consent": true,
+    "expected": "DENY"
+  }
+]

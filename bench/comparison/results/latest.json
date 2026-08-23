@@ -1,0 +1,330 @@
+{
+  "generated_at": "2026-08-23T14:39:45Z",
+  "methodology": {
+    "scenario_count": 6,
+    "iterations_per_scenario": 50,
+    "warmup_per_scenario": 10,
+    "comparable_result": "policy conformance for Decision OS built-in+legitimacy, OPA HTTP, and Cedar CLI on the same six cases",
+    "latency_not_a_ranking": true,
+    "native_schemas": {
+      "decision-os-min": "actor, tool, capability, action_purpose, data_labels, payload.consent",
+      "opa": "actor, tool, purpose, data_label, consent",
+      "cedar": "principal, action, resource, context.{consent,purpose,data_label}"
+    },
+    "host": {
+      "platform": "Windows-10-10.0.19045-SP0",
+      "python": "3.13.2",
+      "processor": "Intel64 Family 6 Model 142 Stepping 9, GenuineIntel"
+    },
+    "warning": "Do not rank systems by latency. Cedar's measured cost includes a fresh CLI process; OPA is a warm HTTP query; Decision OS policy-only is in-process. MCP is not a policy engine."
+  },
+  "systems": [
+    {
+      "implementation": "decision-os-min-policy",
+      "version": "0.1.0",
+      "comparable_policy_decision": true,
+      "scope": "in-process built-in authority + legitimacy meet only; no signature, token, PEP, effect, or audit",
+      "conformance": [
+        {
+          "id": "support_reply_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "finance_refund_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "missing_consent_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "missing_capability_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "purpose_mismatch_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "unknown_actor_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        }
+      ],
+      "timing": {
+        "n": 300,
+        "warmup_discarded_per_scenario": 10,
+        "median_us": 16.0,
+        "p95_us": 30.6,
+        "median_ms": 0.016,
+        "p95_ms": 0.031
+      }
+    },
+    {
+      "implementation": "opa",
+      "version": "1.19.1",
+      "image": "openpolicyagent/opa@sha256:04efa82e4b5d41f2d58645146ddb1df89a9a140a14e8f787ca73d986e3d84bc9",
+      "comparable_policy_decision": true,
+      "scope": "warm HTTP authorization query against official OPA; no PEP, effect, token, or audit",
+      "conformance": [
+        {
+          "id": "support_reply_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "finance_refund_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "missing_consent_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "missing_capability_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "purpose_mismatch_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "unknown_actor_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        }
+      ],
+      "timing": {
+        "n": 300,
+        "warmup_discarded_per_scenario": 10,
+        "median_us": 3734.65,
+        "p95_us": 5503.5,
+        "median_ms": 3.735,
+        "p95_ms": 5.503
+      }
+    },
+    {
+      "implementation": "cedar",
+      "version": "cedar-policy-cli 4.12.0",
+      "comparable_policy_decision": true,
+      "scope": "official Cedar CLI authorize subprocess per request (process spawn is in the measured cost; this is not the in-process cedar-policy library); no PEP, effect, token, or audit",
+      "conformance": [
+        {
+          "id": "support_reply_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "finance_refund_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "missing_consent_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "missing_capability_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "purpose_mismatch_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "unknown_actor_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        }
+      ],
+      "timing": {
+        "n": 300,
+        "warmup_discarded_per_scenario": 10,
+        "median_us": 27389.45,
+        "p95_us": 32581.3,
+        "median_ms": 27.389,
+        "p95_ms": 32.581
+      }
+    },
+    {
+      "implementation": "decision-os-min-signed",
+      "version": "0.1.0",
+      "comparable_policy_decision": false,
+      "scope": "kernel.decide: policy composition + action bind + Ed25519 sign + one-time token mint; no PEP, effect, or audit",
+      "conformance": [
+        {
+          "id": "support_reply_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "finance_refund_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "missing_consent_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "missing_capability_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "purpose_mismatch_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "unknown_actor_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        }
+      ],
+      "timing": {
+        "n": 300,
+        "warmup_discarded_per_scenario": 10,
+        "median_us": 1011.35,
+        "p95_us": 1255.8,
+        "median_ms": 1.011,
+        "p95_ms": 1.256
+      }
+    },
+    {
+      "implementation": "decision-os-min",
+      "version": "0.1.0",
+      "comparable_policy_decision": false,
+      "scope": "full product path: signed decision + one-time PEP + effect callback + audit append",
+      "conformance": [
+        {
+          "id": "support_reply_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "finance_refund_allowed",
+          "expected": "ALLOW",
+          "actual": "ALLOW",
+          "match": true
+        },
+        {
+          "id": "missing_consent_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "missing_capability_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "purpose_mismatch_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        },
+        {
+          "id": "unknown_actor_denied",
+          "expected": "DENY",
+          "actual": "DENY",
+          "match": true
+        }
+      ],
+      "timing": {
+        "n": 300,
+        "warmup_discarded_per_scenario": 10,
+        "median_us": 10411.1,
+        "p95_us": 17216.0,
+        "median_ms": 10.411,
+        "p95_ms": 17.216
+      }
+    },
+    {
+      "implementation": "official-mcp-typescript-sdk",
+      "version": "2.0.0",
+      "comparable_policy_decision": false,
+      "scope": "warm connected stdio tool round-trip and schema validation; MCP is a transport, not a legitimacy/authority engine, so it has no allow/deny verdict",
+      "conformance": [
+        {
+          "id": "support_reply_allowed",
+          "transported": true,
+          "handler_executed": true
+        },
+        {
+          "id": "finance_refund_allowed",
+          "transported": true,
+          "handler_executed": true
+        },
+        {
+          "id": "missing_consent_denied",
+          "transported": true,
+          "handler_executed": true
+        },
+        {
+          "id": "missing_capability_denied",
+          "transported": true,
+          "handler_executed": true
+        },
+        {
+          "id": "purpose_mismatch_denied",
+          "transported": true,
+          "handler_executed": true
+        },
+        {
+          "id": "unknown_actor_denied",
+          "transported": true,
+          "handler_executed": true
+        }
+      ],
+      "timing": {
+        "n": 300,
+        "warmup_discarded_per_scenario": 10,
+        "median_us": 1062.6,
+        "p95_us": 1497.3,
+        "median_ms": 1.063,
+        "p95_ms": 1.497
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "decision-os-real-mcp-comparison",
+  "version": "1.0.0",
+  "description": "Official MCP SDK transport baseline for the Decision OS comparison",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "run": "node client.mjs"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.4.3"
+  }
+}

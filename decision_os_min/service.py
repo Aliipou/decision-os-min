@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from .authority_pdp import AuthorityPDP, CedarCLIAuthorityPDP, OPAHTTPAuthorityPDP
 from .kernel import Kernel
 
 logging.basicConfig(
@@ -40,6 +41,74 @@ def _load_policy() -> dict[str, Any]:
     return _DEFAULT_POLICY
 
 
+def _env_timeout(name: str, default: str = "1.0") -> float | None:
+    raw = os.environ.get(name, default).strip().lower()
+    if raw in ("", "none", "off"):
+        return None
+    value = float(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive or 'none'")
+    return value
+
+
+def _required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is required for the selected authority PDP")
+    return value
+
+
+def _load_authority_pdp() -> AuthorityPDP | None:
+    mode = os.environ.get("DECISION_OS_AUTHORITY_PDP", "builtin").strip().lower()
+    if mode == "builtin":
+        return None
+    if mode == "opa":
+        timeout = _env_timeout("DECISION_OS_OPA_TIMEOUT_S")
+        if timeout is None:
+            raise ValueError("DECISION_OS_OPA_TIMEOUT_S cannot be disabled")
+        return OPAHTTPAuthorityPDP(
+            _required_env("DECISION_OS_OPA_DECISION_URL"),
+            policy_revision=_required_env("DECISION_OS_OPA_POLICY_REVISION"),
+            timeout_s=timeout,
+            health_url=os.environ.get("DECISION_OS_OPA_HEALTH_URL") or None,
+        )
+    if mode == "cedar":
+        timeout = _env_timeout("DECISION_OS_CEDAR_TIMEOUT_S")
+        if timeout is None:
+            raise ValueError("DECISION_OS_CEDAR_TIMEOUT_S cannot be disabled")
+        context_raw = os.environ.get(
+            "DECISION_OS_CEDAR_CONTEXT_MAP",
+            '{"purpose":"action_purpose"}',
+        )
+        context_map = json.loads(context_raw)
+        if not isinstance(context_map, dict) or not all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in context_map.items()
+        ):
+            raise ValueError("DECISION_OS_CEDAR_CONTEXT_MAP must be a string map")
+        return CedarCLIAuthorityPDP(
+            _required_env("DECISION_OS_CEDAR_BIN"),
+            policies=_required_env("DECISION_OS_CEDAR_POLICIES"),
+            entities=_required_env("DECISION_OS_CEDAR_ENTITIES"),
+            schema=os.environ.get("DECISION_OS_CEDAR_SCHEMA") or None,
+            policy_revision=_required_env("DECISION_OS_CEDAR_POLICY_REVISION"),
+            timeout_s=timeout,
+            principal_type=os.environ.get(
+                "DECISION_OS_CEDAR_PRINCIPAL_TYPE", "Agent"
+            ),
+            resource_type=os.environ.get(
+                "DECISION_OS_CEDAR_RESOURCE_TYPE", "Effect"
+            ),
+            default_resource=os.environ.get(
+                "DECISION_OS_CEDAR_DEFAULT_RESOURCE", "governed"
+            ),
+            context_map=context_map,
+        )
+    raise ValueError(
+        "DECISION_OS_AUTHORITY_PDP must be one of: builtin, opa, cedar"
+    )
+
+
 class ActionIn(BaseModel):
     actor: str
     tool: str
@@ -62,13 +131,17 @@ class DecisionOut(BaseModel):
 
 def create_app() -> FastAPI:
     key_path = os.environ.get("DECISION_OS_KEY_FILE")
-    timeout_raw = os.environ.get("DECISION_OS_EVALUATOR_TIMEOUT_S", "1.0").strip().lower()
-    if timeout_raw in ("", "none", "off"):
-        timeout: float | None = None
-    else:
-        timeout = float(timeout_raw)
+    timeout = _env_timeout("DECISION_OS_EVALUATOR_TIMEOUT_S")
+    authority_timeout = _env_timeout("DECISION_OS_AUTHORITY_TIMEOUT_S")
+    authority_pdp = _load_authority_pdp()
 
-    kernel = Kernel(_load_policy(), key_path=key_path, evaluator_timeout_s=timeout)
+    kernel = Kernel(
+        _load_policy(),
+        key_path=key_path,
+        evaluator_timeout_s=timeout,
+        authority_pdp=authority_pdp,
+        authority_timeout_s=authority_timeout,
+    )
     from .audit import HashLog
 
     audit_path = os.environ.get("DECISION_OS_AUDIT", "audit.jsonl")
@@ -106,11 +179,17 @@ def create_app() -> FastAPI:
             _ = kernel.public_key_hex()
         except Exception as e:  # noqa: BLE001
             errs.append(f"signing key: {e}")
+        provider_name, provider_revision = kernel.authority_provider()
+        provider_ok, provider_detail = kernel.authority_healthcheck()
+        if not provider_ok:
+            errs.append(f"authority PDP {provider_name}: {provider_detail}")
         ok = not errs
         return {
             "status": "ready" if ok else "not_ready",
             "errors": errs,
             "key_persisted": bool(key_path),
+            "authority_provider": provider_name,
+            "authority_policy_revision": provider_revision,
         }
 
     @app.get("/v1/pubkey")

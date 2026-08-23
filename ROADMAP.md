@@ -34,7 +34,9 @@ research.
 The next milestones are **validation, not more kernel construction**:
 
 1. Independent users (3–5) actually installing and using it.
-2. An empirical comparison vs OPA / Cedar / MCP on a shared workload.
+2. ✅ An empirical comparison vs real OPA / Cedar / MCP on a shared workload
+   (`bench/comparison/`; policy conformance is comparable, latency is not a
+   ranking).
 3. Fixing what real users find.
 4. Independent review / a technical write-up with evidence.
 

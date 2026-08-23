@@ -74,6 +74,26 @@ jobs:
             curl --fail --retry 5 --retry-connrefused --retry-delay 1 "http://127.0.0.1:4173$route"
           done
 
+  real-system-comparison:
+    name: Real OPA / Cedar / MCP comparison
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e .
+      - name: Install pinned official Cedar CLI
+        run: |
+          curl --fail --location --output /tmp/cedar.tar.xz \
+            https://github.com/cedar-policy/cedar/releases/download/cedar-policy-cli-v4.12.0/cedar-policy-cli-x86_64-unknown-linux-gnu.tar.xz
+          echo "fc29b830bca41763c7cbb6ce66d1a14040fc2d077318479512c6a83052b70851  /tmp/cedar.tar.xz" \
+            | sha256sum --check
+          mkdir /tmp/cedar
+          tar -xJf /tmp/cedar.tar.xz -C /tmp/cedar --strip-components=1
+      - name: Run shared-workload conformance
+        run: python bench/comparison/run_comparison.py --iterations 3 --warmup 1 --cedar-bin /tmp/cedar/cedar
+
   docker:
     runs-on: ubuntu-latest
     environment:

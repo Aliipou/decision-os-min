@@ -1,4 +1,4 @@
-"""The kernel: the single authority. Sign decisions, mint one-time tokens.
+"""The kernel: sole executable-decision signer and one-time token minter.
 
 This is the distilled core of the multi-repo Decision OS — the ~30% that carries
 the real security value, in one file with no cross-repo machinery. Deterministic;
@@ -30,6 +30,13 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from .attenuation import AuthorityGraph, Macaroon
+from .authority_pdp import (
+    AuthorityMutationUnsupported,
+    AuthorityPDP,
+    BuiltinAuthorityPDP,
+    CanonicalAuthorityResult,
+    evaluate_authority,
+)
 
 # Verdicts + the meet/compose primitives live in compose.py (the base module with
 # no internal deps). Imported here and re-exported, so existing callers that do
@@ -37,6 +44,7 @@ from .attenuation import AuthorityGraph, Macaroon
 from .compose import (
     ALLOW,
     CONTAIN,
+    DEFER,
     DENY,
     LIMIT,
     PERMITTING,
@@ -179,7 +187,7 @@ def load_or_create_signing_key(path: str | None) -> Ed25519PrivateKey:
 
 
 class Kernel:
-    """The sole decision authority: holds the signing key and the policy."""
+    """Sole execution authority: canonicalizes PDP output, signs, and mints."""
 
     def __init__(
         self,
@@ -188,6 +196,8 @@ class Kernel:
         *,
         key_path: str | None = None,
         evaluator_timeout_s: float | None = 1.0,
+        authority_pdp: AuthorityPDP | None = None,
+        authority_timeout_s: float | None = 1.0,
     ) -> None:
         self._key = _key or load_or_create_signing_key(key_path)
         self._pub = self._key.public_key().public_bytes_raw().hex()
@@ -204,6 +214,17 @@ class Kernel:
         # attenuated children that cannot amplify tools or outlive their parent.
         self.authority = AuthorityGraph()
         self.authority.set_root_grants(self._grants)
+        self._builtin_authority: BuiltinAuthorityPDP | None = None
+        if authority_pdp is None:
+            self._builtin_authority = BuiltinAuthorityPDP(
+                self._grants,
+                self._bindings,
+                self.authority,
+                default_deny=self._default_deny,
+            )
+            authority_pdp = self._builtin_authority
+        self._authority_pdp = authority_pdp
+        self._authority_timeout_s = authority_timeout_s
 
     def public_key_pem(self) -> str:
         return self._key.public_key().public_bytes(
@@ -213,16 +234,30 @@ class Kernel:
     def public_key_hex(self) -> str:
         return self._pub
 
+    def authority_provider(self) -> tuple[str, str]:
+        """Return the selected PDP identity and policy revision (never secrets)."""
+        return (
+            self._authority_pdp.name,
+            self._authority_pdp.policy_revision,
+        )
+
+    def authority_healthcheck(self) -> tuple[bool, str]:
+        return self._authority_pdp.healthcheck()
+
     def grant(self, actor: str, capability: str) -> None:
         """Explicit root issuance — the only operation that raises authority."""
-        self._grants.setdefault(actor, [])
-        if capability not in self._grants[actor]:
-            self._grants[actor].append(capability)
-        self.authority.grant(actor, capability)
+        if self._builtin_authority is None:
+            raise AuthorityMutationUnsupported(
+                f"{self._authority_pdp.name} policy is externally managed"
+            )
+        self._builtin_authority.grant(actor, capability)
 
     def revoke(self, actor: str, capability: str) -> None:
-        self._grants[actor] = [c for c in self._grants.get(actor, []) if c != capability]
-        self.authority.revoke(actor, capability)
+        if self._builtin_authority is None:
+            raise AuthorityMutationUnsupported(
+                f"{self._authority_pdp.name} policy is externally managed"
+            )
+        self._builtin_authority.revoke(actor, capability)
 
     def delegate(
         self,
@@ -233,36 +268,42 @@ class Kernel:
         expires_at: datetime | None = None,
     ) -> Macaroon:
         """Attenuating delegation (AE-4 / AE-5). See ``attenuation.AuthorityGraph``."""
-        return self.authority.delegate(parent, child, tools, expires_at=expires_at)
+        if self._builtin_authority is None:
+            raise AuthorityMutationUnsupported(
+                f"{self._authority_pdp.name} policy is externally managed"
+            )
+        return self._builtin_authority.delegate(
+            parent, child, tools, expires_at=expires_at
+        )
 
     def _sign(self, obj: dict[str, Any]) -> str:
         return self._key.sign(_canonical(obj)).hex()
 
-    def _evaluate(self, action: dict[str, Any], threat_class: str | None) -> dict[str, Any]:
-        actor = action.get("actor", "")
+    def _evaluate(
+        self,
+        action: dict[str, Any],
+        threat_class: str | None,
+        *,
+        authority_timeout_s: float | None,
+    ) -> tuple[dict[str, Any], CanonicalAuthorityResult]:
         ref = action.get("nonce") or action.get("action_ref") or ""
-        cap = action.get("capability") or f"tool:{action.get('tool', '')}"
-        tool = action.get("tool")
 
         def d(verdict: str, reason: str, **extra: Any) -> dict[str, Any]:
             return {"verdict": verdict, "reason": reason, "action_ref": ref, **extra}
 
-        # ambiguity: capability and tool must agree if both are given.
-        if action.get("capability") and tool and action["capability"] != f"tool:{tool}":
-            return d(DENY, f"ambiguous: capability '{action['capability']}' != tool '{tool}'")
-        # capability gate — root grant OR a live attenuated macaroon (AE-4/AE-5).
-        if not self.authority.holds(actor, cap):
-            return d(DENY, f"actor '{actor}' lacks capability '{cap}'")
-        # purpose binding — a hard DENY here DOMINATES containment (advisory never
-        # loosens a verdict).
-        for label in action.get("data_labels", []):
-            allowed = self._bindings.get(label)
-            if allowed is None:
-                if self._default_deny:
-                    return d(DENY, f"unknown data purpose '{label}' -> default-deny")
-                continue
-            if action.get("action_purpose") not in allowed:
-                return d(DENY, f"purpose mismatch: '{label}' != '{action.get('action_purpose')}'")
+        authority_result = evaluate_authority(
+            self._authority_pdp,
+            action,
+            timeout_s=authority_timeout_s,
+        )
+        authority_decision = d(
+            authority_result.verdict,
+            authority_result.reason,
+            authority_provider=authority_result.provider,
+            authority_policy_revision=authority_result.policy_revision,
+        )
+        if authority_result.verdict in {DENY, DEFER}:
+            return authority_decision, authority_result
         # Data minimization is an OBLIGATION, not a verdict. Compute it FIRST so it
         # survives whatever verdict this action ends up with. It used to be computed
         # AFTER the containment return, so a CONTAIN decision carried no
@@ -285,20 +326,35 @@ class Kernel:
                 break
         obligations: dict[str, Any] = {"transformed_payload": payload} if redacted else {}
 
-        # containment — only for otherwise-permitted actions. It CARRIES the
-        # redaction: a sandbox constrains egress and lifetime, not what the tool is
-        # shown.
+        local_decision = d(ALLOW, "host obligations satisfied")
         if threat_class in self._contain:
-            return d(
+            local_decision = d(
                 CONTAIN,
                 f"threat '{threat_class}' -> sandbox"
                 + (f"; redacted {redacted}" if redacted else ""),
-                containment=dict(_CONTAINMENT),
-                **obligations,
             )
-        if redacted:
-            return d(LIMIT, f"redacted {redacted}", **obligations)
-        return d(ALLOW, "all checks passed")
+        elif redacted:
+            local_decision = d(LIMIT, f"redacted {redacted}")
+
+        decision = more_restrictive(authority_decision, local_decision)
+        if decision["verdict"] == LIMIT:
+            if not redacted:
+                return (
+                    d(
+                        DENY,
+                        "authority LIMIT has no host-owned transformation -> fail-closed",
+                        authority_provider=authority_result.provider,
+                        authority_policy_revision=authority_result.policy_revision,
+                    ),
+                    authority_result,
+                )
+            decision.update(obligations)
+        elif decision["verdict"] == CONTAIN:
+            decision["containment"] = dict(_CONTAINMENT)
+            decision.update(obligations)
+        decision["authority_provider"] = authority_result.provider
+        decision["authority_policy_revision"] = authority_result.policy_revision
+        return decision, authority_result
 
     def decide(
         self,
@@ -308,6 +364,7 @@ class Kernel:
         advisor: Advisor | None = None,
         evaluators: list[Evaluator] | None = None,
         evaluator_timeout: float | None | object = ...,
+        authority_timeout: float | None | object = ...,
     ) -> dict[str, Any]:
         """Return {decision, signature, token}. The decision and token both bind
         the action fingerprint; token is None for non-permitting verdicts.
@@ -316,6 +373,11 @@ class Kernel:
         it the kernel works fully; with it the kernel CONSULTS its suggestion but
         still makes the call. `advisor` takes precedence over an explicit
         `threat_class` when both are given.
+
+        The selected trusted ``AuthorityPDP`` supplies the policy ruling. It may
+        grant or deny, but receives no signing/minting/execution capability.
+        This kernel canonicalizes that ruling and remains the only component
+        capable of producing a signed executable decision.
 
         `evaluators` are OPTIONAL **co-equal** governance evaluators (e.g. an FDK
         legitimacy evaluator, and later safety/privacy/cost/...). Unlike an
@@ -334,8 +396,18 @@ class Kernel:
         unbounded in-process evaluation."""
         if advisor is not None:
             threat_class = advisor(action)
-        # AUTHORITY: this kernel's own capability/purpose ruling.
-        decision = self._evaluate(action, threat_class)
+        authority_timeout_value: float | None = (
+            self._authority_timeout_s
+            if authority_timeout is ...
+            else authority_timeout  # type: ignore[assignment]
+        )
+        # TRUSTED POLICY AUTHORITY: the selected PDP may grant/deny, but only this
+        # kernel can canonicalize obligations, sign, and mint.
+        decision, authority_result = self._evaluate(
+            action,
+            threat_class,
+            authority_timeout_s=authority_timeout_value,
+        )
         # CO-EQUAL EVALUATORS: fold each verdict in by meet, deny-dominant. This
         # happens before issued_by/binding/mint below, so the token (minted only
         # on a PERMITTING composed verdict) can never precede the composition.
@@ -405,6 +477,10 @@ class Kernel:
                 ax = out.get("axiom_ids")
                 if isinstance(ax, (list, tuple)):
                     axiom_acc.extend(str(a) for a in ax)
+        # Provider identity/revision are kernel-owned fields. Preserve them even
+        # when a legitimacy evaluator's stricter verdict governs the meet.
+        decision["authority_provider"] = authority_result.provider
+        decision["authority_policy_revision"] = authority_result.policy_revision
         decision["issued_by"] = KERNEL_IDENTITY
         decision["action_binding"] = action_fingerprint(action)
         # M5: cryptographic binding of legitimacy evidence into the signed decision.
