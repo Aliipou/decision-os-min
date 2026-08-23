@@ -1,8 +1,15 @@
 # Real-system comparison harness
 
-This harness runs one six-scenario governance workload through real
-implementations, then **separates** the comparable result from the
-non-comparable measurements.
+This harness is **not** a worth ranking of Decision OS against Cedar.
+
+Cedar is a general authorization language. Decision OS is ownership-preserving
+mediation for **autonomous systems that act**. They overlap on one question
+(*may this actor do this?*) and do not share axioms or use case. The harness
+exists so that overlap is measured honestly, and so we cannot claim to beat
+Cedar as a policy engine.
+
+It runs one six-scenario workload through real implementations, then
+**separates** the comparable result from the non-comparable measurements.
 
 1. Decision OS built-in authority + legitimacy (policy decision only)
 2. Official OPA Docker image (HTTP authorization query)
@@ -65,9 +72,11 @@ handler was not reached.
 
 ## What this establishes—and does not
 
-It establishes shared-scenario agreement and records boundary-specific latency
-on one machine after warmup. It does not establish production throughput,
-equivalent feature scope, distributed correctness, or superiority over any
-compared project. Cedar and OPA remain stronger policy languages. Decision OS
-is being measured as an enforcement chain after a policy decision, not as a
-replacement PDP.
+It establishes shared-scenario **authorization** agreement and records
+boundary-specific latency on one machine after warmup. It does not establish
+that Decision OS and Cedar have the same use case or axioms, production
+throughput, or superiority over any compared project.
+
+Cedar and OPA remain stronger, more general policy languages. Decision OS is
+measured here as an enforcement chain after a policy decision — the part
+autonomous action needs and a PDP does not provide. MCP is transport only.

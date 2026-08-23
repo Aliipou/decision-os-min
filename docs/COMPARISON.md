@@ -1,21 +1,50 @@
-# Decision OS vs. the alternatives — for governing AI-agent tool execution
+# Decision OS vs. the alternatives
 
 This is an honest positioning of Decision OS (and its reference core
-`decision-os-min`) against the real alternatives, for one specific use case. It is
-written to be defensible, not flattering: where existing tools are more mature, it
-says so; where Decision OS genuinely differs, it says why; and it names the prior
-art that is converging on the same idea.
+`decision-os-min`). It is written to be defensible, not flattering.
 
-## The use case, precisely
+Cedar, OPA, MCP, macaroons, and gateways are real and often more mature. They
+are also **not the same product**. Treating a six-case allow/deny table as a
+worth ranking against Cedar would be a bad comparison.
 
-> An autonomous AI agent proposes tool calls (send an email, issue a refund, query
-> a record). Something must decide, per action, whether it may run — and if so
-> under what constraints — then **mediate execution** and leave a **non-repudiable
-> record**. The agent, its planner, and the transport are all **untrusted**.
+## Why this project exists (not "beat Cedar")
+
+The intended use is **autonomous systems that act** — toward AGI and after —
+where a machine can cause effects without a human in the loop each time.
+General authorization does not preserve **human ownership** of those effects.
+This runtime is a property-rights-shaped mediation layer: legitimacy
+(ownership/consent) may only deny; authority is a delegated right; use is
+one-time and action-bound; the audit is independent of the actor.
+
+That is a candidate governance piece for machine–human coexistence. It is
+**not** a claim that the project saves the world, encodes a complete ethic,
+or solves AGI safety. See [WHY.md](WHY.md).
+
+## Not the same use case, not the same axioms
+
+| | Cedar / OPA | Decision OS |
+|---|---|---|
+| Use case | General authorization (users, APIs, services, also agents) | Autonomous actors + **effects** |
+| Axioms | principal × action × resource × context → permit/forbid | legitimacy ⊥ authority; delegated right; bind; spend once; signed PEP |
+| Stops at | a policy decision | the effect, or a refusal with an audit record |
+| Generality | **Wins** | Narrower on purpose |
+
+They can agree on “may this actor do this?” and still not be substitutes.
+Cedar is more general. This exists because a yes that does not mediate the
+tool is not governance of autonomous action.
+
+## The operational use case (what the code actually does)
+
+> An autonomous agent proposes tool calls (send an email, issue a refund,
+> deploy). Something must decide, per action, whether it may run — and if so
+> under what constraints — then **mediate execution** and leave a
+> **non-repudiable record**. The agent, its planner, and the transport are
+> all **untrusted**.
 
 That is narrower than "authorization" in general. It has four sub-problems:
-**identity** (who is the agent), **decision** (may this action run), **enforcement**
-(actually stop it, before side effects), and **audit** (prove what happened).
+**identity** (who is the actor), **decision** (may this action run),
+**enforcement** (actually stop it, before side effects), and **audit**
+(prove what happened).
 
 ## The alternative landscape (as of mid-2026)
 
@@ -28,10 +57,12 @@ That is narrower than "authorization" in general. It has four sub-problems:
 | Tamper-evident audit | Sigstore **Rekor** / Trillian (Merkle transparency logs) | non-repudiable, append-only records |
 | Emerging agent-native research | **Agent Identity Protocol (AIP)** — verifiable delegation; **Agent Control Protocol** — "admission control for agent actions"; Vouchsafe | the whole agent-action-governance problem |
 
-**Nobody ships all four sub-problems as one small coherent thing tuned for agent
-tool-execution** — the mature options are each strong at one layer. That gap is the
-only reason Decision OS is interesting; it is also why "just assemble the mature
-pieces" is a serious alternative (see below).
+**Nobody ships all four sub-problems as one small coherent thing tuned for
+autonomous tool-execution** — the mature options are each strong at one
+layer. That gap is the only engineering reason Decision OS is interesting;
+it is also why "just assemble the mature pieces" is a serious alternative
+(see below). The civilizational reason — ownership-preserving governance as
+machines act — is [WHY.md](WHY.md). It is not proven by the layer table.
 
 ## How Decision OS compares, dimension by dimension
 
@@ -114,11 +145,19 @@ Whether that opinionated integration is worth owning versus assembling mature pa
 is a real, open question — not one this project has yet earned the right to answer
 with external evidence.
 
-A pinned empirical check lives in [`bench/comparison/`](../bench/comparison/):
-Decision OS, official OPA, and official Cedar agree on six shared allow/deny
-cases. That is policy-conformance evidence, not a speed ranking and not a
-claim that Decision OS is a better policy language. MCP is measured as
-transport only.
+## Why the empirical OPA / Cedar / MCP harness exists
+
+Not to decide which project is “better.” Cedar is more general and a stronger
+policy language. The harness exists so the overlap is measured honestly:
+
+- Decision OS, official OPA, and official Cedar **agree 6/6** on equivalent
+  grants/consent/purpose/label cases. That is shared *authorization
+  questions*, not shared axioms.
+- Latency is labeled by boundary and is **not a ranking**.
+- Official MCP still **executes the handler** on cases this runtime would
+  deny — transport is not governance.
+
+Pinned inputs: [`bench/comparison/`](../bench/comparison/).
 
 ## Prior art and convergence (validation *and* competition)
 
@@ -132,11 +171,12 @@ runnable today — not being first or most rigorous.
 ## Claims we deliberately do NOT make
 
 Until there is external review, real deployment, and independent attack, these
-sentences are unearned and appear nowhere in this project's docs:
+sentences are unearned:
 
 - ❌ "Decision OS is the first…" — the [Agent Control Protocol](https://arxiv.org/pdf/2603.18829) and [AIP](https://arxiv.org/pdf/2603.24775) are working the same problem.
 - ❌ "Revolutionary / next-generation…" — the primitives are standard; only the composition is opinionated.
-- ❌ "Solves AI safety…" — it governs *tool execution*, one narrow slice.
+- ❌ "Solves AI safety / saves the world / governs AGI…" — it mediates *configured tool effects* so injected legitimacy (ownership/consent) is hard to skip. That is a slice of governance, not a civilizational proof.
+- ❌ "Better than Cedar." — Cedar wins as general authorization. This is a different use case.
 - ❌ Any performance claim without the numbers to back it (see `BENCHMARKS.md` once measured).
 
 Conceding that OPA/Cedar lead on policy language and MCP leads on ecosystem
@@ -145,13 +185,13 @@ it trustworthy.
 
 ## Bottom line
 
-For the agent-tool-execution use case, Decision OS is best understood as an
-**opinionated reference architecture** that integrates known-good primitives with
-two arguably-distinctive ideas (action-content binding, advisory/authority split).
-It is **not** a mature substitute for OPA/Cedar/MCP-OAuth/Rekor, and it should not
-claim to be until it has external review, real deployment, and independent attack.
-Its near-term value is as a **clear, minimal, auditable model** — for teaching, for
-a starter, and for comparison against the assembled-from-parts approach.
+Decision OS is **ownership-preserving mediation for autonomous action**. Cedar
+is **general authorization**. They can share a front-door question and still
+not be the same design. This runtime is a small, auditable reference for the
+narrower job — not a mature substitute for OPA/Cedar/MCP-OAuth/Rekor, and not
+a proof that AGI-era ethics are solved. Its near-term value is as a clear
+mechanism others can attack, install, and refuse if the ownership gate does
+not hold.
 
 ---
 

@@ -74,8 +74,10 @@ execution TCB. This repository does not contain an in-repo Rust binding.
 
 ## What this does NOT prove
 
-The authority model is sound *given* the threat model. It says nothing about
-whether the model is **useful** — that only real deployment, independent use, and
-an empirical comparison against OPA/Cedar can establish. The remaining risk is not
-the authority design; it is proving the design earns its place. That is validation
-work, not more design.
+The authority model is sound *given* the threat model. It does not prove that
+the design is **useful**, that it governs AGI, or that it is worth more than
+Cedar. Cedar is a more general permission engine; this runtime is a different
+axiom set (legitimacy ⊥ delegated right → signed one-time effect). Usefulness
+is whether autonomous actors cannot cause effects without that checkpoint —
+real deployment, independent use, and outside review. The OPA/Cedar harness
+only measures overlapping allow/deny questions, not that worth.

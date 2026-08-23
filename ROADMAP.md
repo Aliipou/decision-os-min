@@ -35,10 +35,14 @@ The next milestones are **validation, not more kernel construction**:
 
 1. Independent users (3–5) actually installing and using it.
 2. ✅ An empirical comparison vs real OPA / Cedar / MCP on a shared workload
-   (`bench/comparison/`; policy conformance is comparable, latency is not a
-   ranking).
+   (`bench/comparison/`; overlapping allow/deny questions only — not the same
+   use case or axioms as Cedar, and not a speed ranking).
 3. Fixing what real users find.
 4. Independent review / a technical write-up with evidence.
+
+The reason to keep the core small is the reason the project exists:
+autonomous systems that act will need ownership-preserving governance.
+Growing an OS-shaped kernel does not prove that.
 
 Only if the core earns its place does the OS track become worth starting. Until
 then this file is a *direction*, not a backlog.

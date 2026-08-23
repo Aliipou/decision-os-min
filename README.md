@@ -2,14 +2,25 @@
 
 **Live (graph):** [https://ali-decision-os-min.vercel.app](https://ali-decision-os-min.vercel.app)
 
-**An evidence-driven agent governance runtime: signed decisions, mandatory
-Hosted effect mediation, tamper-evident audit, and an optional Linux/Docker
-isolation profile for untrusted agent code.**
+**An evidence-driven governance runtime for autonomous systems that act:
+signed decisions, mandatory Hosted effect mediation, tamper-evident audit,
+and an optional Linux/Docker isolation profile for untrusted agent code.**
 
 > **What "OS" means here:** an *execution-governance / decision-enforcement layer*
-> — the authority + audit plane for an agent's tool calls — **not** an operating
-> system in the classic sense. It's a research-*oriented* architecture: its
-> advantages over existing tools are not yet proven by independent evaluation.
+> — the authority + audit plane for an autonomous actor's tool calls — **not**
+> an operating system in the classic sense. It is a research-oriented
+> architecture: a candidate piece of machine–human infrastructure, not a
+> proven civilizational layer and not a substitute for general IAM.
+
+> **Why it exists.** As systems become more autonomous — toward AGI and after —
+> they will still need a way to act in the world. Prompt rules and permission
+> engines do not preserve **human ownership** of those effects. This runtime
+> is built so an autonomous caller cannot cause an email, payout, or deploy
+> except through a right that can be vetoed by legitimacy (ownership/consent),
+> delegated and spent once, and audited. That is a governance shape for
+> machine–human coexistence, not a claim that it "saves the world" or solves
+> AGI safety. Ethics and morals remain **injected policy**; the kernel only
+> makes that policy hard to skip. See [docs/WHY.md](docs/WHY.md).
 
 > **Legitimacy ⊥ Authority — two independent constraints**
 > (see [contracts-spec/POSITIONING.md](https://github.com/Aliipou/contracts-spec/blob/main/POSITIONING.md)):
@@ -77,12 +88,32 @@ regressions in `tests/test_redteam_composition.py` and `tests/test_redteam_round
 AE-4/AE-5 use a macaroon-inspired attenuation graph (`decision_os_min/attenuation.py`)
 — caveats only narrow; child expiry clamped to parent.
 
-## Real OPA / Cedar / MCP comparison
+## Claims, comparison, and why we still measure OPA / Cedar / MCP
 
-The comparable result is **policy conformance**, not speed. Decision OS, official
-OPA 1.19.1, and official Cedar CLI 4.12.0 encode equivalent grants, consent,
-purpose, and data-label rules in each native schema. MCP is a transport: it has
-no allow/deny verdict.
+**What we claim.** This is for **autonomous systems**, not general IAM. The
+axioms are not Cedar's. Cedar evaluates *principal, action, resource, context*
+→ permit/forbid. This runtime treats action as **use of a right**: legitimacy
+(ownership/consent) may only deny; authority is a delegated capability;
+the grant is bound to one action and spent once; an effect requires a signed
+decision the caller does not mint. Cedar is more general. This is narrower on
+purpose — and that is the reason to have it.
+
+**What we do not claim.** It does not encode a complete moral theory, prove
+property rights, or govern AGI. It mediates configured tool effects under an
+explicit threat model. Independent users and outside review are still open.
+
+**Why a Cedar/OPA/MCP comparison exists at all.** Not to rank worth. The
+projects overlap on one front-door question (*may this actor do this?*) and
+diverge immediately after. We run a shared six-case workload so we cannot
+pretend to beat Cedar as a policy language, and so MCP's transport-only
+behavior is visible: its handler still ran on the four cases governance
+denies. Agreement on cases is **not** sameness of axioms or use case.
+Full positioning: [`docs/COMPARISON.md`](docs/COMPARISON.md).
+
+The comparable empirical result is **policy conformance**, not speed. Decision
+OS, official OPA 1.19.1, and official Cedar CLI 4.12.0 encode equivalent
+grants, consent, purpose, and data-label rules in each native schema. MCP is
+a transport: it has no allow/deny verdict.
 
 Measured 2026-08-23 on Windows 10 (Intel Core i5-7300U), Python 3.13.2, after
 **10 discarded warmup iterations** per scenario and **50 timed iterations**
@@ -105,10 +136,11 @@ Observed cost at each boundary — **not a ranking**; envelopes differ:
 | Decision OS full `handle` | 10.411 / 17.216 ms | extra work: sign + one-time PEP + callback + audit |
 | Official MCP TypeScript SDK 2.0.0 | 1.063 / 1.497 ms | **6/6 calls transported**; verdict N/A |
 
-Cedar and OPA remain stronger **policy languages**. Decision OS is the
-enforcement chain **after** a policy decision (signed bind, one-time PEP,
-audit). MCP's real handler was reached even for the four cases governance
-denies, which is why a separate enforcement layer is needed.
+Cedar and OPA remain stronger **policy languages** and more general
+authorization. This runtime is the enforcement chain **after** a policy
+decision (signed bind, one-time PEP, audit) for autonomous actors. MCP's
+real handler was reached even for the four cases governance denies, which
+is why a permission answer without mediation is not enough.
 
 Reproduce from pinned inputs and inspect the machine-readable result:
 [`bench/comparison/README.md`](bench/comparison/README.md) ·
@@ -156,7 +188,8 @@ logic realizes LIMIT/CONTAIN, and the kernel remains the sole signer/minter.
 
 ## Govern your agent's tools — signed authorization + audit
 
-The wedge: **governed tool execution for AI agents** under an explicit threat model.
+The wedge: **governed tool execution for autonomous agents** under an explicit
+threat model — human ownership as a non-skippable gate on machine effects.
 You write a policy and wrap tools / use the Hosted plane; host-registered effects
 cannot skip Admission→legitimacy→authority→PEP. **Ambient OS effects** (files,
 sockets, subprocess) are **not** closed by the Python library alone — use the
@@ -184,14 +217,14 @@ ambient effects elsewhere in the application are closed.
 
 ### Who this is for — and who it isn't
 
-**For you if:** you run AI agents (or are about to) that hold **sensitive tools** —
-email, payments, files, internal APIs — and you need *authorization + a
-verifiable execution trail* on what they do. That's the pain this solves.
+**For you if:** you run autonomous or semi-autonomous agents that hold
+**sensitive tools** — email, payments, files, internal APIs — and you need
+human ownership/consent to be able to veto, plus a verifiable trail of what
+was actually executed.
 
-**Not for you (yet) if:** your agents only do read-only / harmless things, or you
-have no compliance/audit need — then this is overhead you don't need, and OPA/Cedar
-or your own middleware may fit better. That's an honest answer, and knowing it is
-more useful than a star.
+**Not for you (yet) if:** you need a general permission language for users and
+APIs (use Cedar/OPA), or your agents only do read-only / harmless things.
+This is overhead you don't need, and knowing that is more useful than a star.
 
 ## Security properties tested
 
