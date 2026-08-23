@@ -52,6 +52,9 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    environment:
+      name: production-smoke
+      url: https://github.com/${{ github.repository }}/deployments/production-smoke
     steps:
       - uses: actions/checkout@v4
       - name: Build image
