@@ -1,9 +1,9 @@
 # decision-os-min
 
-**Live (graph):** [https://ali-decision-os-min.vercel.app](https://ali-decision-os-min.vercel.app)
+**Explainer (static, no PEP):** [https://ali-decision-os-min.vercel.app](https://ali-decision-os-min.vercel.app) — browser walkthrough only; it does not sign, mint, or execute effects.
 
 **An evidence-driven governance runtime for autonomous systems that act:
-signed decisions, mandatory Hosted effect mediation, tamper-evident audit,
+signed decisions, an optional Hosted effect plane, tamper-evident audit,
 and an optional Linux/Docker isolation profile for untrusted agent code.**
 
 > **What "OS" means here:** an *execution-governance / decision-enforcement layer*
@@ -22,11 +22,16 @@ and an optional Linux/Docker isolation profile for untrusted agent code.**
 > AGI safety. Ethics and morals remain **injected policy**; the kernel only
 > makes that policy hard to skip. See [docs/WHY.md](docs/WHY.md).
 
+> **Constitution (why the two layers exist):**
+> [Aliipou/freedom-theory](https://github.com/Aliipou/freedom-theory) — the book,
+> A1–A7, and the philosopher edition. This repo is the **authority + audit PEP**,
+> not the moral floor. Ethics stay injected; FDK is DENY-only legitimacy.
+>
 > **Legitimacy ⊥ Authority — two independent constraints**
 > (see [contracts-spec/POSITIONING.md](https://github.com/Aliipou/contracts-spec/blob/main/POSITIONING.md)):
 > - **FDK — legitimacy** (ownership / consent / verifier): *should this happen at
 >   all?* A **DENY-only** gate.
-> - **AuthGate — authority** (delegated machine property rights: tool-permission +
+> - **AuthGate — authority** (delegated spendable capability: tool-permission +
 >   runtime enforcement): *does this actor hold the capability?* Grants only
 >   within legitimacy.
 >
@@ -35,9 +40,9 @@ and an optional Linux/Docker isolation profile for untrusted agent code.**
 > invariant is not evaluator order: legitimacy may only deny and authority can
 > never override that denial.
 > The *normative rule* filling each slot is injected policy — never baked into the
-> kernel — so operational frameworks (GDPR, HIPAA, the EU AI Act, ISO 42001, NIST
-> AI RMF) also express as enforceable, auditable policy on top. A proposed
-> architecture, not a proven paradigm.
+> kernel — so an operator can inject their own rules. This repo does not
+> implement or attest GDPR, HIPAA, the EU AI Act, ISO 42001, or NIST AI RMF.
+> A proposed architecture, not a proven paradigm.
 
 ```python
 from decision_os_min import DecisionOS
@@ -70,6 +75,9 @@ Do **not** read “AI infrastructure” as “fully non-bypassable.” Claims ar
 
 Threat-model source of truth: [`docs/THREAT_MODELS.md`](docs/THREAT_MODELS.md).
 Per-layer negative contract: [`docs/FORBIDDEN_ACTIONS.md`](docs/FORBIDDEN_ACTIONS.md).
+Path to a **standard** (interop profile) and to **infrastructure** (residuals):
+[`docs/STANDARD_AND_INFRA.md`](docs/STANDARD_AND_INFRA.md) — aspirational; not
+earned yet.
 
 ### Earlier composition / red-team results (still held)
 
@@ -117,7 +125,7 @@ a transport: it has no allow/deny verdict.
 
 Measured 2026-08-23 on Windows 10 (Intel Core i5-7300U), Python 3.13.2, after
 **10 discarded warmup iterations** per scenario and **50 timed iterations**
-(300 observations per scope):
+(300 observations per scope). Six toy cases; conformance, not a ranking:
 
 | Comparable policy decision | Shared-workload result | Measured boundary |
 |---|---:|---|
@@ -189,7 +197,8 @@ logic realizes LIMIT/CONTAIN, and the kernel remains the sole signer/minter.
 ## Govern your agent's tools — signed authorization + audit
 
 The wedge: **governed tool execution for autonomous agents** under an explicit
-threat model — human ownership as a non-skippable gate on machine effects.
+threat model — human ownership/consent as a gate on **wrapped or host-registered**
+effects.
 You write a policy and wrap tools / use the Hosted plane; host-registered effects
 cannot skip Admission→legitimacy→authority→PEP. **Ambient OS effects** (files,
 sockets, subprocess) are **not** closed by the Python library alone — use the
@@ -332,7 +341,7 @@ it performs no external effect and is not the Python authority service.
 
 ```bash
 python -m http.server 4173 --directory public
-# production-equivalent static build:
+# static explainer build:
 npx vercel build
 ```
 
@@ -369,9 +378,9 @@ policy semantics but still cannot sign, mint, spend, or bypass the PEP. See
 | `contracts-spec` package + JSON Schema | formal **types** in `contracts.py` |
 | 7 repos + venv + integration harness | `pip install decision-os-min` |
 
-The contract is still **formal** — `Action`, `Decision`, `CapabilityToken`,
-`AuditEntry` are typed (`contracts.py`); they cost nothing at runtime but stop
-drift. The FDK is **not deleted**, just right-sized: an advisor is a plain
+The message shapes are **typed** — `Action`, `Decision`, `CapabilityToken`,
+`AuditEntry` are `TypedDict`s (`contracts.py`); they cost nothing at runtime but
+reduce drift. That is not a machine-checked spec. The FDK is **not deleted**, just right-sized: an advisor is a plain
 `(action) -> threat_class | None` function; omit it and the system works fully.
 
 ## Relationship to the full Decision OS
@@ -405,6 +414,8 @@ explore native trusted-core components:
   (Lean 4 / TLA+ / Kani).
 - **[freedom-decision-kernel/rust](https://github.com/Aliipou/freedom-decision-kernel)**
   — the Rust *legitimacy-kernel* parity port.
+- **[freedom-theory](https://github.com/Aliipou/freedom-theory)** — the book and
+  philosopher edition (A1–A7). Not linked as a Python dependency.
 
 They are future parity/hardening targets, not evidence that this package
 currently executes a Rust kernel. Any eventual binding must pass differential
