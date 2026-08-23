@@ -50,6 +50,30 @@ jobs:
           AUTHGATE_BACKEND: python
           AGENT_SANDBOX_IMAGE: decision-os-agent:noambient-v1
 
+  product-site:
+    name: Product site production smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate static bundle
+        run: |
+          node --check public/app.js
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          json.loads(Path("vercel.json").read_text(encoding="utf-8"))
+          for asset in ("index.html", "styles.css", "app.js"):
+              assert (Path("public") / asset).is_file(), asset
+          PY
+      - name: Smoke-test routes
+        run: |
+          python -m http.server 4173 --directory public >/tmp/site.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for route in / /styles.css /app.js; do
+            curl --fail --retry 5 --retry-delay 1 "http://127.0.0.1:4173$route"
+          done
+
   docker:
     runs-on: ubuntu-latest
     environment:
