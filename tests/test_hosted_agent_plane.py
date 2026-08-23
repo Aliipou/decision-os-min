@@ -10,7 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from decision_os_min.host import AgentHost, Intent, locked_agent_docker_cmd, spawn_host
+from decision_os_min.host import (
+    MAX_IPC_FRAME_BYTES,
+    AgentHost,
+    Intent,
+    locked_agent_docker_cmd,
+    spawn_host,
+)
 from decision_os_min.spentstore import InMemorySpentStore
 
 POLICY = {
@@ -153,3 +159,99 @@ def test_h5_locked_agent_command_uses_declared_tm_a_boundary(tmp_path):
     assert "--security-opt=seccomp=/profiles/noambient.json" in cmd
     assert "agent:test" in cmd
     assert cmd[-2:] == ["/lock_and_run.py", "/agent.py"]
+
+
+def test_h6_ipc_binds_identity_and_refuses_request_replay(tmp_path):
+    effects: list[str] = []
+
+    def deploy_ranking(*, model: str, **_kw):
+        effects.append(model)
+        return f"deployed:{model}"
+
+    host = AgentHost(
+        policy=POLICY,
+        legitimacy=_legit,
+        adapters={"deploy_ranking": deploy_ranking},
+        audit_path=str(tmp_path / "ipc.jsonl"),
+        bound_agent_id="bot-1",
+    )
+    host.register_agent("bot-1", actor="agent:bot", stakeholder="ops")
+    frame = Intent(
+        "bot-1",
+        "deploy_ranking",
+        {"model": "v1"},
+        "deploy",
+        "ranking",
+        "req-1",
+    ).to_wire()
+
+    first = json.loads(host.handle_ipc_line(json.dumps(frame)))
+    replay = json.loads(host.handle_ipc_line(json.dumps(frame)))
+    spoof = dict(frame, request_id="req-2", agent_id="other-agent")
+    spoofed = json.loads(host.handle_ipc_line(json.dumps(spoof)))
+
+    assert first["ok"] is True
+    assert replay["ok"] is False and replay["error"] == "request_replay"
+    assert spoofed["ok"] is False and spoofed["error"] == "channel_identity_mismatch"
+    assert effects == ["v1"]
+
+
+def test_h7_ipc_schema_and_frame_size_fail_closed(tmp_path):
+    effects: list[str] = []
+    host = AgentHost(
+        policy=POLICY,
+        legitimacy=_legit,
+        adapters={"deploy_ranking": lambda **_kw: effects.append("ran")},
+        audit_path=str(tmp_path / "frames.jsonl"),
+        bound_agent_id="bot-1",
+    )
+    host.register_agent("bot-1", actor="agent:bot", stakeholder="ops")
+
+    valid = Intent(
+        "bot-1",
+        "deploy_ranking",
+        {"model": "v1"},
+        "deploy",
+        request_id="req-schema",
+    ).to_wire()
+    unknown = dict(valid, unexpected="authority")
+    wrong_payload = dict(valid, request_id="req-payload", payload=["not", "an", "object"])
+
+    for raw in (
+        json.dumps(unknown),
+        json.dumps(wrong_payload),
+        "[]",
+        "{",
+        "x" * (MAX_IPC_FRAME_BYTES + 1),
+    ):
+        result = json.loads(host.handle_ipc_line(raw))
+        assert result["ok"] is False
+        assert result["error"] == "invalid_frame"
+    assert effects == []
+
+
+def test_h8_client_timeout_kills_unresponsive_host(tmp_path):
+    script = tmp_path / "hung_host.py"
+    script.write_text(
+        "import json, sys, time\n"
+        "print(json.dumps({'v': 1, 'type': 'ready'}), flush=True)\n"
+        "sys.stdin.readline()\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    client = spawn_host(
+        policy=POLICY,
+        agent_id="bot-1",
+        actor="agent:bot",
+        stakeholder="ops",
+        host_script=script,
+        request_timeout_s=0.2,
+    )
+    try:
+        assert client.proc.stdout is not None
+        json.loads(client.proc.stdout.readline())
+        with pytest.raises(TimeoutError, match="timed out"):
+            client.request("deploy_ranking", {"model": "v1"}, "deploy")
+        assert client.proc.poll() is not None
+    finally:
+        client.close()

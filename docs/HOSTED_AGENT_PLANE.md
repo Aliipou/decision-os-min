@@ -44,6 +44,12 @@ carrying protocol-v1 JSONL. `AgentHost` and its adapter stay on the host. No
 network interface or host/Docker socket is exposed to the container, so this
 request/response pipe is not a general outbound transport.
 
+The stdio channel is bound to its configured `agent_id`; a frame cannot claim a
+different registered identity. Intent frames use an exact schema, a 64 KiB
+limit, non-empty bounded request IDs, and atomic request-ID spending through the
+configured `SpentStore`. Duplicate request IDs, unknown fields, malformed JSON,
+oversized frames, and identity spoofing fail closed before an adapter executes.
+
 ## Next milestone
 
 Only if residuals demand it: gVisor / Host native TCB.  

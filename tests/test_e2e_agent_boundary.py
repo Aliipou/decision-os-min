@@ -92,6 +92,7 @@ def test_locked_agent_intent_ipc_reaches_only_governed_host_effect(tmp_path):
         legitimacy=lambda _action: (True, "ok", ()),
         adapters={"host_write_receipt": host_write_receipt},
         audit_path=str(tmp_path / "audit.jsonl"),
+        bound_agent_id="sandbox-agent",
         spent_store=InMemorySpentStore(),
     )
     host.register_agent("sandbox-agent", actor="agent:e2e", stakeholder="ops")

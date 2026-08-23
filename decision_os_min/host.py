@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -28,9 +29,21 @@ from pathlib import Path
 from typing import Any
 
 from .sealed import AdmissionError, SealedRefused, SealedRuntime
-from .spentstore import InMemorySpentStore, SpentStore
+from .spentstore import InMemorySpentStore, SpentStore, SpentStoreUnavailable
 
 PROTOCOL = 1
+MAX_IPC_FRAME_BYTES = 64 * 1024
+MAX_REQUEST_ID_CHARS = 128
+_INTENT_KEYS = {
+    "v",
+    "type",
+    "request_id",
+    "agent_id",
+    "tool",
+    "payload",
+    "intent",
+    "resource",
+}
 
 
 @dataclass(frozen=True)
@@ -58,13 +71,29 @@ class Intent:
     def from_wire(msg: dict[str, Any]) -> Intent:
         if msg.get("v") != PROTOCOL or msg.get("type") != "intent":
             raise ValueError("invalid intent wire message")
+        unknown = set(msg) - _INTENT_KEYS
+        if unknown:
+            raise ValueError("unknown intent fields")
+        required = {"request_id", "agent_id", "tool", "payload", "intent"}
+        if not required.issubset(msg):
+            raise ValueError("missing intent fields")
+        for key in ("request_id", "agent_id", "tool", "intent"):
+            if not isinstance(msg[key], str) or not msg[key]:
+                raise ValueError(f"{key} must be a non-empty string")
+        if len(msg["request_id"]) > MAX_REQUEST_ID_CHARS:
+            raise ValueError("request_id too long")
+        if not isinstance(msg["payload"], dict):
+            raise ValueError("payload must be an object")
+        resource = msg.get("resource", "")
+        if not isinstance(resource, str):
+            raise ValueError("resource must be a string")
         return Intent(
-            agent_id=str(msg["agent_id"]),
-            tool=str(msg["tool"]),
-            payload=dict(msg.get("payload") or {}),
-            intent=str(msg["intent"]),
-            resource=str(msg.get("resource") or ""),
-            request_id=str(msg.get("request_id") or ""),
+            agent_id=msg["agent_id"],
+            tool=msg["tool"],
+            payload=dict(msg["payload"]),
+            intent=msg["intent"],
+            resource=resource,
+            request_id=msg["request_id"],
         )
 
 
@@ -87,13 +116,16 @@ class AgentHost:
     legitimacy: Callable[[dict[str, Any]], tuple[bool | None, str, tuple[str, ...]]]
     adapters: dict[str, Callable[..., Any]]
     audit_path: str
+    bound_agent_id: str | None = None
     spent_store: SpentStore | None = None
     runtime: SealedRuntime = field(init=False)
     evidence: list[HostedEvidence] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _spent_store: SpentStore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         store = self.spent_store or InMemorySpentStore()
+        self._spent_store = store
         # Copy adapters into a private registry; agent never sees these callables.
         owned = {name: fn for name, fn in self.adapters.items()}
         self.runtime = SealedRuntime(
@@ -111,6 +143,40 @@ class AgentHost:
 
     def handle_intent(self, intent: Intent) -> HostedEvidence:
         with self._lock:
+            if self.bound_agent_id is not None and intent.agent_id != self.bound_agent_id:
+                ev = HostedEvidence(
+                    request_id=intent.request_id,
+                    agent_id=intent.agent_id,
+                    tool=intent.tool,
+                    ok=False,
+                    error="channel_identity_mismatch",
+                )
+                self.evidence.append(ev)
+                return ev
+            if intent.request_id:
+                replay_key = f"ipc:{self.bound_agent_id or intent.agent_id}:{intent.request_id}"
+                try:
+                    first_request = self._spent_store.try_spend(replay_key)
+                except SpentStoreUnavailable:
+                    ev = HostedEvidence(
+                        request_id=intent.request_id,
+                        agent_id=intent.agent_id,
+                        tool=intent.tool,
+                        ok=False,
+                        error="request_store_unavailable",
+                    )
+                    self.evidence.append(ev)
+                    return ev
+                if not first_request:
+                    ev = HostedEvidence(
+                        request_id=intent.request_id,
+                        agent_id=intent.agent_id,
+                        tool=intent.tool,
+                        ok=False,
+                        error="request_replay",
+                    )
+                    self.evidence.append(ev)
+                    return ev
             ticket = self.runtime.admit(intent.agent_id)
             try:
                 out = self.runtime.invoke(
@@ -161,27 +227,41 @@ class AgentHost:
     def handle_ipc_line(self, line: str) -> str:
         """Validate one untrusted JSONL frame and return one result frame."""
         try:
+            if len(line.encode("utf-8")) > MAX_IPC_FRAME_BYTES:
+                raise ValueError("frame too large")
             msg = json.loads(line)
             if not isinstance(msg, dict):
                 raise ValueError("IPC frame must be a JSON object")
             if msg.get("type") == "ping":
+                if msg != {"v": PROTOCOL, "type": "ping"}:
+                    raise ValueError("invalid ping frame")
                 resp = {"v": PROTOCOL, "type": "pong"}
             else:
                 resp = self.handle_wire(msg)
-        except Exception as exc:
+        except Exception:
             resp = {
                 "v": PROTOCOL,
                 "type": "result",
                 "request_id": "",
                 "ok": False,
                 "output": None,
-                "error": f"host_error: {exc}",
+                "error": "invalid_frame",
             }
         return json.dumps(resp, default=str)
 
     def serve_stdio(self) -> None:
         """Line-delimited JSON IPC on stdin/stdout (host side)."""
-        for line in sys.stdin:
+        while True:
+            line = sys.stdin.readline(MAX_IPC_FRAME_BYTES + 1)
+            if not line:
+                break
+            if len(line.encode("utf-8")) > MAX_IPC_FRAME_BYTES:
+                # Drain the rest of the oversized frame without parsing it.
+                while line and not line.endswith("\n"):
+                    line = sys.stdin.readline(MAX_IPC_FRAME_BYTES + 1)
+                sys.stdout.write(self.handle_ipc_line("x" * (MAX_IPC_FRAME_BYTES + 1)) + "\n")
+                sys.stdout.flush()
+                continue
             line = line.strip()
             if not line:
                 continue
@@ -205,6 +285,7 @@ class AgentClient:
 
     proc: subprocess.Popen[str]
     agent_id: str
+    request_timeout_s: float = 5.0
 
     def request(
         self,
@@ -223,7 +304,20 @@ class AgentClient:
         assert self.proc.stdin is not None and self.proc.stdout is not None
         self.proc.stdin.write(json.dumps(msg) + "\n")
         self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
+        replies: queue.Queue[str] = queue.Queue(maxsize=1)
+
+        def _read_reply() -> None:
+            assert self.proc.stdout is not None
+            replies.put(self.proc.stdout.readline())
+
+        reader = threading.Thread(target=_read_reply, daemon=True)
+        reader.start()
+        try:
+            line = replies.get(timeout=self.request_timeout_s)
+        except queue.Empty as exc:
+            self.proc.kill()
+            self.proc.wait(timeout=5)
+            raise TimeoutError("host IPC response timed out") from exc
         if not line:
             raise RuntimeError("host closed IPC")
         return json.loads(line)
@@ -245,6 +339,7 @@ def spawn_host(
     stakeholder: str,
     host_script: str | Path | None = None,
     env: dict[str, str] | None = None,
+    request_timeout_s: float = 5.0,
 ) -> AgentClient:
     """Start AgentHost in a child process; return an Intent-only client.
 
@@ -268,7 +363,7 @@ def spawn_host(
         text=True,
         env=child_env,
     )
-    return AgentClient(proc=proc, agent_id=agent_id)
+    return AgentClient(proc=proc, agent_id=agent_id, request_timeout_s=request_timeout_s)
 
 
 def locked_agent_docker_cmd(

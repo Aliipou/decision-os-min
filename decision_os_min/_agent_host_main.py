@@ -55,6 +55,7 @@ def main() -> None:
         legitimacy=_legit,
         adapters={"deploy_ranking": deploy_ranking, "audit_export": audit_export},
         audit_path=audit,
+        bound_agent_id=agent_id,
     )
     host.register_agent(agent_id, actor=actor, stakeholder=stakeholder)
     # Ready signal so client can sync (optional ping).
