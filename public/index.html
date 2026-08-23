@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Decision OS is an evidence-driven governance runtime for consequential agent actions.">
+  <meta name="theme-color" content="#07110f">
+  <title>Decision OS — Govern the effect, not the prompt</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="nav-wrap">
+    <nav class="nav shell" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Decision OS home"><span class="brand-mark">D/</span> Decision OS</a>
+      <div class="nav-links">
+        <a href="#architecture">Architecture</a>
+        <a href="#evidence">Evidence</a>
+        <a href="#limitations">Limits</a>
+      </div>
+      <a class="button button-small button-ghost" href="https://github.com/Aliipou/decision-os-min">View source <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero shell" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="pulse"></span> Open-source reference runtime</p>
+        <h1>Govern the effect.<br><span>Not the prompt.</span></h1>
+        <p class="lede">Decision OS puts a signed, one-time enforcement boundary between an AI agent’s intent and a consequential tool effect.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#demo">Run the walkthrough <span aria-hidden="true">↓</span></a>
+          <a class="button button-ghost" href="https://github.com/Aliipou/decision-os-min#quick-start">Install locally</a>
+        </div>
+        <ul class="checks" aria-label="Key properties">
+          <li>Signed decisions</li><li>One-time tokens</li><li>Action binding</li><li>Tamper-evident audit</li>
+        </ul>
+      </div>
+      <div class="hero-console" aria-label="Example governed decision">
+        <div class="window-bar"><span></span><span></span><span></span><p>decision.trace</p></div>
+        <div class="trace">
+          <p><i>01</i><b>INTENT</b><span>agent:support → send_email</span></p>
+          <p><i>02</i><b>LEGITIMACY</b><span class="ok">consent verified</span></p>
+          <p><i>03</i><b>AUTHORITY</b><span class="ok">capability matched</span></p>
+          <p><i>04</i><b>KERNEL</b><span>decision signed + action bound</span></p>
+          <p><i>05</i><b>PEP</b><span class="ok">token spent atomically</span></p>
+          <p><i>06</i><b>EFFECT</b><span class="ok">executed + audited</span></p>
+        </div>
+        <div class="verdict"><span>ALLOW</span><code>sig: ed25519:a91c…</code></div>
+      </div>
+    </section>
+
+    <section class="proof-band" aria-label="Security model summary">
+      <div class="shell proof-grid">
+        <div><strong>Deny-dominant</strong><span>Independent checks can only tighten a verdict</span></div>
+        <div><strong>Fail-closed</strong><span>Malformed, expired, or replayed requests stop</span></div>
+        <div><strong>Hosted boundary</strong><span>Adapters stay outside untrusted agent code</span></div>
+        <div><strong>Evidence-led</strong><span>Claims are scoped to executable tests</span></div>
+      </div>
+    </section>
+
+    <section class="section shell intro">
+      <div>
+        <p class="eyebrow">The control problem</p>
+        <h2>Intelligence can propose.<br>Authority must decide.</h2>
+      </div>
+      <div class="body-copy">
+        <p>Prompt instructions are not an enforcement boundary. An agent that can directly reach an email adapter, payment API, or filesystem can bypass guidance when context is poisoned or software fails.</p>
+        <p>Decision OS moves authority into a small runtime that verifies the exact action, signs the verdict, mediates execution, consumes a one-time token, and records what actually happened.</p>
+      </div>
+    </section>
+
+    <section class="section shell" id="architecture">
+      <div class="section-head">
+        <div><p class="eyebrow">Architecture</p><h2>One narrow path to effects.</h2></div>
+        <p>Policy remains replaceable. Enforcement remains structural.</p>
+      </div>
+      <div class="pipeline" aria-label="Decision OS architecture">
+        <article><span>01</span><small>Untrusted</small><h3>Agent</h3><p>Produces a typed Intent. It never receives the live effect adapter.</p></article>
+        <div class="arrow" aria-hidden="true">→</div>
+        <article><span>02</span><small>Policy</small><h3>Evaluators</h3><p>Legitimacy and authority checks compose as a deny-dominant meet.</p></article>
+        <div class="arrow" aria-hidden="true">→</div>
+        <article class="active"><span>03</span><small>Trust core</small><h3>Kernel</h3><p>Binds the verdict to canonical action bytes and signs it with Ed25519.</p></article>
+        <div class="arrow" aria-hidden="true">→</div>
+        <article><span>04</span><small>Enforcement</small><h3>PEP + Host</h3><p>Verifies, atomically spends, audits, then invokes the owned adapter.</p></article>
+      </div>
+      <div class="boundary-note"><strong>Two trust domains.</strong> The optional Linux/Docker profile constrains the agent process; the Host process retains credentials, signing keys, policy, and adapters. This is a qualified boundary, not a universal sandbox claim.</div>
+    </section>
+
+    <section class="section demo-section" id="demo">
+      <div class="shell">
+        <div class="section-head">
+          <div><p class="eyebrow">Interactive explainer</p><h2>Follow a decision end to end.</h2></div>
+          <p>This deterministic browser model mirrors the documented decision flow. It does not execute an external effect or replace the Python runtime.</p>
+        </div>
+        <div class="demo-grid">
+          <form class="demo-controls" id="demo-form">
+            <label for="scenario">Scenario</label>
+            <select id="scenario">
+              <option value="support">Consent-backed support reply</option>
+              <option value="payout">Over-limit payout request</option>
+              <option value="spoof">Spoofed agent identity</option>
+            </select>
+            <div class="field-row">
+              <label>Actor<input id="actor" value="agent:support" spellcheck="false"></label>
+              <label>Tool<input id="tool" value="send_email" spellcheck="false"></label>
+            </div>
+            <label>Purpose<input id="purpose" value="support_reply" spellcheck="false"></label>
+            <label>Payload<textarea id="payload" rows="4" spellcheck="false">{"to":"customer@example.test","template":"case_update"}</textarea></label>
+            <div class="toggles">
+              <label><input type="checkbox" id="consent" checked><span></span> Consent attested</label>
+              <label><input type="checkbox" id="capability" checked><span></span> Capability delegated</label>
+            </div>
+            <div class="demo-actions">
+              <button class="button button-primary" type="submit">Evaluate intent</button>
+              <button class="button button-ghost" type="button" id="replay" disabled>Attempt replay</button>
+            </div>
+          </form>
+          <div class="demo-output" aria-live="polite">
+            <div class="output-head"><span>Runtime trace</span><span class="status idle" id="status">READY</span></div>
+            <ol id="steps">
+              <li><span>1</span><div><b>Waiting for intent</b><small>Choose a scenario and evaluate it.</small></div></li>
+            </ol>
+            <div class="decision-card" id="decision-card" hidden>
+              <div><small>Final verdict</small><strong id="final-verdict">—</strong></div>
+              <div><small>Reason</small><code id="final-reason">—</code></div>
+              <div><small>Action digest</small><code id="digest">—</code></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section shell" id="evidence">
+      <div class="section-head">
+        <div><p class="eyebrow">Evidence, not adjectives</p><h2>Every claim has a boundary.</h2></div>
+        <p>The repository separates Hosted enforcement (TM-H), named OS-isolation slices, and the stronger unproven TM-A/full claim.</p>
+      </div>
+      <div class="evidence-grid">
+        <article><span class="badge pass">PASS</span><h3>Hosted effects</h3><p>An admitted agent cannot invoke a registered Host adapter without a valid Intent and governed execution path.</p><code>tests/test_hosted_agent_plane.py</code></article>
+        <article><span class="badge pass">PASS</span><h3>Combined boundary</h3><p>A locked Docker agent communicates over bounded JSONL IPC while the effect adapter stays outside.</p><code>tests/test_e2e_agent_boundary.py</code></article>
+        <article><span class="badge scoped">SCOPED</span><h3>OS isolation</h3><p>Tested slices block durable filesystem writes, network, process/thread creation, W^X, ptrace, and FD exhaustion.</p><code>tests/test_os_isolation.py</code></article>
+        <article><span class="badge partial">PARTIAL</span><h3>TM-A full</h3><p>No claim of absolute ambient isolation: Host compromise, kernel/container escape, and out-of-profile execution remain residuals.</p><code>docs/THREAT_MODELS.md</code></article>
+      </div>
+    </section>
+
+    <section class="section shell concepts">
+      <p class="eyebrow">Core mechanics</p>
+      <div class="concept-grid">
+        <article><span>⊥</span><h3>Deny-dominant composition</h3><p>Independent evaluators meet on a canonical verdict lattice. A plugin cannot grant authority or weaken another denial.</p></article>
+        <article><span>⌁</span><h3>Action binding</h3><p>The signature covers canonical action content. A valid decision for one payload cannot authorize another.</p></article>
+        <article><span>1×</span><h3>Atomic spend</h3><p>Each execution token is consumed exactly once through a durable SpentStore boundary.</p></article>
+        <article><span>⛓</span><h3>Execution truth</h3><p>The audit chain distinguishes allowed-but-refused from allowed-and-executed and records the payload digest.</p></article>
+      </div>
+    </section>
+
+    <section class="section shell" id="limitations">
+      <div class="limitations">
+        <div><p class="eyebrow">Known limitations</p><h2>What this does not claim.</h2></div>
+        <ul>
+          <li><b>Not a prompt firewall.</b> It governs configured effects, not model thoughts or arbitrary external access.</li>
+          <li><b>Not a universal sandbox.</b> Docker evidence is Linux-profile-specific and does not prove resistance to kernel escape.</li>
+          <li><b>Not a distributed control plane.</b> Multi-machine replay storage, consensus, TLS, and key rotation require deployment infrastructure.</li>
+          <li><b>Not policy truth.</b> The runtime enforces supplied legitimacy and authority rules; it does not prove their moral correctness.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="cta shell">
+      <p class="eyebrow">Inspect the mechanism</p>
+      <h2>Small enough to audit.<br>Strict enough to matter.</h2>
+      <p>Run the test suite, break the invariants, and evaluate the evidence.</p>
+      <div><a class="button button-primary" href="https://github.com/Aliipou/decision-os-min">Explore on GitHub <span aria-hidden="true">↗</span></a><a class="button button-ghost" href="https://github.com/Aliipou/decision-os-min/blob/main/docs/THREAT_MODELS.md">Read the threat model</a></div>
+    </section>
+  </main>
+
+  <footer><div class="shell"><a class="brand" href="#top"><span class="brand-mark">D/</span> Decision OS</a><p>Reference implementation. Apache-2.0.</p><div><a href="https://github.com/Aliipou/decision-os-min">GitHub</a><a href="https://github.com/Aliipou/decision-os-min/blob/main/SECURITY.md">Security</a><a href="https://github.com/Aliipou/decision-os-min/blob/main/ROADMAP.md">Roadmap</a></div></div></footer>
+</body>
+</html>

@@ -2,27 +2,27 @@
 
 **Live (graph):** [https://ali-decision-os-min.vercel.app](https://ali-decision-os-min.vercel.app)
 
-**A minimal reference implementation of the Decision OS: it preserves the core
-security invariants in a single package, collapsing the multi-repo architecture
-into one `handle()` call.**
+**An evidence-driven agent governance runtime: signed decisions, mandatory
+Hosted effect mediation, tamper-evident audit, and an optional Linux/Docker
+isolation profile for untrusted agent code.**
 
 > **What "OS" means here:** an *execution-governance / decision-enforcement layer*
 > — the authority + audit plane for an agent's tool calls — **not** an operating
 > system in the classic sense. It's a research-*oriented* architecture: its
 > advantages over existing tools are not yet proven by independent evaluation.
 
-> **Legitimacy ⊥ Authority — two enforced layers of one engineered moral order**
-> (see [`contracts-spec/POSITIONING.md`](../contracts-spec/POSITIONING.md)). This is not "just a legitimacy
-> filter" and not "just neutral plumbing." Two independent layers:
+> **Legitimacy ⊥ Authority — two independent constraints**
+> (see [contracts-spec/POSITIONING.md](https://github.com/Aliipou/contracts-spec/blob/main/POSITIONING.md)):
 > - **FDK — legitimacy** (ownership / consent / verifier): *should this happen at
->   all?* A **DENY-only** gate. Runs **first**.
+>   all?* A **DENY-only** gate.
 > - **AuthGate — authority** (delegated machine property rights: tool-permission +
 >   runtime enforcement): *does this actor hold the capability?* Grants only
->   **within** legitimacy. Runs **after** FDK.
+>   within legitimacy.
 >
-> `LegitimacyAuthorityPipeline` (shipped here) wires them in the locked order.
-> **Invariant, enforced by structure:** legitimacy may only DENY (it returns just
-> `(ok, reason)`, never a grant); authority never overrides a legitimacy denial.
+> `LegitimacyAuthorityPipeline` provides a sequential helper; the general
+> evaluator composer uses a commutative, deny-dominant meet. The security
+> invariant is not evaluator order: legitimacy may only deny and authority can
+> never override that denial.
 > The *normative rule* filling each slot is injected policy — never baked into the
 > kernel — so operational frameworks (GDPR, HIPAA, the EU AI Act, ISO 42001, NIST
 > AI RMF) also express as enforceable, auditable policy on top. A proposed
@@ -38,8 +38,8 @@ outcome = dos.handle(action, tools)          # one call: gates → decision → 
 A single authority (the kernel) signs a decision **bound to the action's
 content** and mints a **one-time** capability token; the executor (PEP) runs an
 effect ONLY against that signed, bound decision and unspent token; every decision
-is appended to **one** tamper-evident hash-chained log. That is the whole security
-model — in ~400 lines, stdlib + `cryptography` only.
+is appended to **one** tamper-evident hash-chained log. Hosted agents add a
+separate trust domain; OS isolation remains an explicit, qualified profile.
 
 ## Status — infrastructure claims (2026-08-23)
 
@@ -50,12 +50,15 @@ Do **not** read “AI infrastructure” as “fully non-bypassable.” Claims ar
 | Decision core / PEP / composition | Signed authority + audit + red-team regressions | **PASS** (in-repo tests) |
 | **TM-H** Hosted agent plane | Host-registered effects only via Intent → Admission→FDK→Auth→PEP | **PASS** — `docs/HOSTED_AGENT_PLANE.md` |
 | **TM-A-v1 FS/NET** | No durable FS write / outbound net / ambient product creds under Docker profile | **PASS** — `sandbox/` |
-| **AgentCreatedProcess + W^X/ptrace** | After `lock_and_run` | **PASS** under declared Linux/Docker profile |
+| **AgentCreatedProcess + W^X/ptrace** | Actual post-lock fork/exec/thread/mmap/ptrace attempts | **BLOCKED** under declared Linux/Docker profile |
 | **Combined boundary** | Locked Docker agent → Intent JSONL → outside `AgentHost` → governed host effect | **PASS** — real IPC/destructors in `tests/test_e2e_agent_boundary.py` |
+| **IPC abuse** | identity spoof, malformed/oversized frames, request replay, unresponsive Host | **BLOCKED** in tested cases |
+| **Resource probes** | thread creation and FD exhaustion | **BLOCKED/LIMITED**; memory/CPU cgroups configured |
 | **TM-A full** `DirectEffect(Agent)=∅` | Absolute ambient isolation | **PARTIAL** — breakout/Host residuals |
 | SealedRuntime alone vs ambient Python | In-process sealing stops sealed-surface bypasses; ambient `open`/`socket` still exist without OS jail | intentional limit |
 
 Threat-model source of truth: [`docs/THREAT_MODELS.md`](docs/THREAT_MODELS.md).
+Per-layer negative contract: [`docs/FORBIDDEN_ACTIONS.md`](docs/FORBIDDEN_ACTIONS.md).
 
 ### Earlier composition / red-team results (still held)
 
@@ -101,11 +104,9 @@ AE-4/AE-5 use a macaroon-inspired attenuation graph (`decision_os_min/attenuatio
         Execute ── Gate 2: signature + action binding + token
 ```
 
-**Locked pipeline order:** identity admission → FDK legitimacy (DENY-only) →
-AuthGate authority (grant within legitimacy) → PEP execute + audit.
-**One action, three gates, one central policy.** The full multi-repo system runs
-the same gates across separate services; here they are collapsed into one call —
-fewer layers, same gate-passes.
+The sequential helper evaluates identity admission → FDK legitimacy (DENY-only)
+→ AuthGate authority → PEP execution and audit. General evaluator composition is
+order-independent and deny-dominant; no ordering grants precedence over a denial.
 
 ## Govern your agent's tools — signed authorization + audit
 
@@ -131,21 +132,25 @@ send_email(to="x", body="y")    # decide -> audit -> execute, or GovernanceRefus
 
 Or govern a whole agent-framework tool registry at once with `gov.wrap(tools, specs=...)`.
 Removing governance means deleting the wrapper and losing your audit trail — the
-friction runs the right way. (You still can't *force* the wider ecosystem with
-code; that's adoption. But inside any app that adopts it, there is no bypass.)
+friction runs the right way. Within the Hosted plane, registered Host adapters
+have no path that skips governed mediation. This is **not** a claim that arbitrary
+ambient effects elsewhere in the application are closed.
 
 ### Who this is for — and who it isn't
 
 **For you if:** you run AI agents (or are about to) that hold **sensitive tools** —
 email, payments, files, internal APIs — and you need *authorization + a
-non-repudiable audit trail* on what they do. That's the pain this solves.
+verifiable execution trail* on what they do. That's the pain this solves.
 
 **Not for you (yet) if:** your agents only do read-only / harmless things, or you
 have no compliance/audit need — then this is overhead you don't need, and OPA/Cedar
 or your own middleware may fit better. That's an honest answer, and knowing it is
 more useful than a star.
 
-## Security Guarantees (proven in `tests/`)
+## Security properties tested
+
+These are executable regression results under the assumptions in
+[`docs/THREAT_MODELS.md`](docs/THREAT_MODELS.md), not formal proofs:
 
 - **Single authority** — only the kernel's Ed25519-signed decisions authorize anything.
 - **Deterministic decision engine** — same (policy, action, advice) ⇒ same verdict; no ML in the decision path.
@@ -153,7 +158,13 @@ more useful than a star.
 - **One-time capability tokens** — replay is refused; no valid token ⇒ no execution; DENY/DEFER never run.
 - **Graduated enforcement** — LIMIT redacts before the tool sees the payload; CONTAIN runs only allowlisted tools.
 - **Advisory ≠ authority** — an advisor can only tighten a verdict, never loosen a DENY.
-- **Tamper-evident audit** — any retroactive edit/insert/delete/reorder is detected.
+- **Tamper-evident audit** — edits/inserts/reorders are detected; tail truncation
+  requires the supported external head anchor.
+
+The Linux/Docker process-isolation results execute real post-`lock_and_run`
+fork/exec/thread, executable-mapping, and ptrace attempts and assert kernel
+refusal; they do not infer enforcement from configuration files alone. See
+`tests/test_os_isolation.py`.
 
 ## Run it as a service (deployable starter)
 
@@ -199,6 +210,54 @@ Untrusted agent  --Intent IPC-->  AgentHost (SealedRuntime + adapters)
 - Host plane: `decision_os_min.host`, `docs/HOSTED_AGENT_PLANE.md`
 - Agent sandbox: `sandbox/README.md`, `docs/THREAT_MODELS.md`
 
+## Local development and verification
+
+Python 3.11+ is required.
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
+pip install -e ".[dev,service]"
+ruff check .
+mypy decision_os_min
+pytest -q
+```
+
+Linux plus Docker is required for the marked TM-A isolation suite:
+
+```bash
+pytest -q -m tm_a tests/test_os_isolation.py tests/test_e2e_agent_boundary.py
+```
+
+Service environment:
+
+| Variable | Required | Purpose |
+|---|---:|---|
+| `DECISION_OS_POLICY` | service only | Policy JSON path |
+| `DECISION_OS_AUDIT` | no | Audit JSONL path |
+| `DECISION_OS_KEY_FILE` | recommended | Persistent Ed25519 private-key path |
+| `DECISION_OS_EVALUATOR_TIMEOUT_S` | no | Fail-closed evaluator timeout |
+| `DECISION_OS_EXPOSE_AUDIT` | no | Set `1` to expose the unauthenticated audit dump |
+
+## Product site and Vercel
+
+The public site in `public/` is a dependency-free explanation and interactive,
+browser-side walkthrough. The walkthrough is deliberately labeled as a model:
+it performs no external effect and is not the Python authority service.
+
+```bash
+python -m http.server 4173 --directory public
+# production-equivalent static build:
+npx vercel build
+```
+
+`vercel.json` sets `public/` as the output directory and applies CSP,
+clickjacking, MIME-sniffing, referrer, and permissions headers. No environment
+variables or backend are required for the explanatory site. A real application
+must deploy the Python service/Host separately behind authenticated TLS ingress;
+do not expose signing keys or effect adapters to the static site.
+
 ## Extending it (plugins)
 
 The kernel is fixed; capability grows in plugins *around* it. A plugin is just a
@@ -212,7 +271,7 @@ contract. No plugin framework to learn — it's the library model.
 - Distributed deployment / multi-node consensus
 - Enterprise integrations and cross-service orchestration
 - Research modules (FDK advisory research beyond the simple plugin)
-- Notary anchoring / external trust roots
+- Bundled production notary / external WORM service (the `HashLog` anchor seam exists)
 - Auth / TLS / rate limiting (do these at the ingress), Helm/K8s, Grafana dashboards
 - Network-level threat model, real load/scale numbers, and formal proofs
 

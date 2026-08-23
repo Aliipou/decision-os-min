@@ -337,15 +337,16 @@ Still required for architecture proof:
 
 ---
 
-# Phase 7 — Implementation stance (deferred)
+# Phase 7 — Implementation status
 
-Per instruction: **do not implement in this step.**
+The original derivation deferred implementation. It has now been exercised in
+the following evidence order:
 
-When implementing, order by evidence gap:
-
-1. Harden **claim text** to TM-H (already largely done).  
-2. Add **OS isolation** until I3 is empirically PASS (closes real remaining hole).  
-3. Only then consider **Rust minimum TCB** for host chokepoint (E) — optional.  
+1. Harden **claim text** to TM-H — done.
+2. Add **OS isolation** and real locked-agent → Host IPC evidence — done for
+   named slices in `THREAT_MODELS.md`; TM-A full remains PARTIAL.
+3. Consider **Rust/native minimum TCB** for the Host only if residual evidence
+   demands it — still optional.
 4. Never start from “rewrite FDK in Rust” as the first move.
 
 ---
@@ -362,7 +363,9 @@ Can legitimacy/authority separation survive a real boundary?
 Can an untrusted agent produce a consequential *host* effect without the chain?  
 **No** on current hosted path (evidence PASS).  
 Can it produce *some* consequential OS effect without the chain?  
-**Yes**, without sandbox (evidence PARTIAL/FAIL).
+**Yes**, without the declared sandbox. Under `agent-noambient-v1` the tested
+FS/network/process/thread/W^X/ptrace slices are blocked; container escape, Host
+compromise, out-of-profile execution, and universal DoS remain residual.
 
 ### Security (remaining attacks)
 
@@ -372,9 +375,10 @@ Sandbox escape; host compromise; stolen host credentials; supply-chain in host; 
 
 ```text
 hosted agent enforcement plane          ✅ (TM-H) — supported
-+ OS-isolated untrusted agent           ⚠ PARTIAL — not yet evidenced as PASS
++ named OS-isolation slices             ✅ under agent-noambient-v1
++ TM-A full DirectEffect(Agent)=∅       ⚠ PARTIAL — residuals documented
 sealed enforcement surface              ✅ inner mechanism, not the product claim
-trusted execution infrastructure        ❌ not yet — needs D (+ optional E) evidence
+trusted execution infrastructure        ❌ not an unqualified claim
 ```
 
 ### Bottom line (correct answer, not confirmation)

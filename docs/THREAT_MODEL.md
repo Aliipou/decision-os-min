@@ -126,19 +126,24 @@ Stated plainly — these are *not* defended by this core:
   (`Kernel._key`). Code execution inside that process reads the key and can sign
   anything. The whole model rests on the kernel process being trustworthy; there
   is no HSM, key isolation, or attestation here.
-- **Network / TLS / key management.** No transport security, key distribution,
-  rotation, or storage is provided. The public key is handed to the executor
-  in-process (`DecisionOS.__init__`); securing that channel in a distributed
-  deployment is out of scope.
-- **Load, scale, concurrency.** The `_spent` set is in-memory and per-executor
-  instance; there is no shared spend-store, so replay protection does not span
-  multiple executor processes. Audit writes are single-file appends with no
-  concurrency control. This is a single-process reference core.
+- **Transport / key isolation.** The HTTP starter can persist an Ed25519 key to
+  `DECISION_OS_KEY_FILE`, and Hosted stdio IPC is local and identity-bound, but
+  there is no TLS/mTLS distribution protocol, key rotation service, HSM/KMS, or
+  remote attestation. A Host compromise can still read the file/process key.
+- **Distributed scale.** Replay protection now uses a `SpentStore` seam with
+  atomic file and SQLite implementations, so processes sharing one host/volume
+  can coordinate. Independent machines with independent disks still need a
+  shared DB/Redis-style atomic backend. The JSONL audit is not a distributed
+  consensus log.
 - **Formal proofs.** Correctness is demonstrated by tests, not by machine-checked
   proof. There is no TLA+/Kani/Lean artifact in this repo.
-- **Denial of service and side channels.** Not modeled.
-- **Notary / external trust root.** The log is self-contained and
-  self-verifying; there is no anchoring to an external, append-only authority.
+- **Denial of service and side channels.** The declared Docker profile limits
+  PIDs, FDs, memory, and CPU and blocks tested thread/fork attacks. Those are
+  bounded probes, not a universal DoS or side-channel proof.
+- **Notary / external trust root.** `HashLog` supports publishing/verifying an
+  external head anchor, but no production WORM/notary service is bundled.
+  Without an external anchor, self-verification alone cannot prove the tail was
+  not truncated.
 
 For the distributed, notarized, and research-extended versions of these, use the
 full multi-repo Decision OS, which extends the *same* decision logic (see

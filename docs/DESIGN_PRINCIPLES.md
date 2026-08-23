@@ -76,10 +76,12 @@ answer to "what was authorized."
 
 ## 7. Minimalism (and the no-fork rule)
 
-This is the **reference core** — the distilled subset that carries the security
-invariants, in ~400 lines with stdlib + `cryptography` only. It deliberately cuts
-the control-plane repo, the notary, the advisory-research repo, and the schema
-package (see [README](../README.md#what-was-deliberately-cut-and-why-its-fine)).
+The decision kernel began as a small **reference core** using stdlib +
+`cryptography`. The repository now also ships optional Hosted, HTTP, attenuation,
+and Linux/Docker evidence modules; those are not evidence that the kernel itself
+must grow into an OS. It still deliberately cuts distributed scheduling,
+federation, and a bundled production notary (see
+[README](../README.md#what-was-deliberately-cut-and-why-its-fine)).
 
 The critical governance rule: the full multi-repo Decision OS **extends the same
 decision logic — it must not fork it.** Decision semantics are stabilized *here
