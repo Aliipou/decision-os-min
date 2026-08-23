@@ -1,21 +1,6 @@
-"""A minimal, deployable HTTP service around the decision core.
+"""Infra-ready HTTP service: policy, persistent key, audit, health/ready, metrics.
 
-This is the "infra-ready starter": it makes `decision-os-min` runnable as a real
-REST service (with OpenAPI, health, and Prometheus metrics) so it can be deployed
-and load-tested — NOT a production-grade, hardened, authenticated gateway. Auth,
-rate limiting, TLS termination, and horizontal scaling are deliberately OUT of the
-starter (do them at the ingress / in front of this).
-
-FastAPI is imported here, never by `decision_os_min/__init__.py`, so
-`import decision_os_min` stays dependency-pure. Install the service deps with:
-
-    pip install "decision-os-min[service]"
-    decision-os-serve            # or: uvicorn decision_os_min.service:app
-
-The service exposes the AUTHORITY (the kernel's decision) and the tamper-evident
-AUDIT. It does NOT execute your tools — execution belongs at the caller's PEP,
-where the side effect actually happens. A client verifies the returned signature
-with GET /v1/pubkey and enforces the verdict + one-time token locally.
+NOT a hardened production gateway — put auth/TLS/rate-limits at the ingress.
 """
 
 from __future__ import annotations
@@ -27,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .kernel import Kernel
@@ -76,21 +61,57 @@ class DecisionOut(BaseModel):
 
 
 def create_app() -> FastAPI:
-    kernel = Kernel(_load_policy())
+    key_path = os.environ.get("DECISION_OS_KEY_FILE")
+    timeout_raw = os.environ.get("DECISION_OS_EVALUATOR_TIMEOUT_S", "1.0").strip().lower()
+    if timeout_raw in ("", "none", "off"):
+        timeout: float | None = None
+    else:
+        timeout = float(timeout_raw)
+
+    kernel = Kernel(_load_policy(), key_path=key_path, evaluator_timeout_s=timeout)
     from .audit import HashLog
 
-    audit = HashLog(os.environ.get("DECISION_OS_AUDIT", "audit.jsonl"))
+    audit_path = os.environ.get("DECISION_OS_AUDIT", "audit.jsonl")
+    audit = HashLog(audit_path)
     metrics: Counter[str] = Counter()
+    expose_audit = os.environ.get("DECISION_OS_EXPOSE_AUDIT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
     app = FastAPI(
         title="decision-os-min",
-        version="0.1.0",
+        version="0.2.0",
         description="Reference authority + audit service for governing agent tool actions.",
     )
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/readyz")
+    def readyz() -> dict[str, Any]:
+        """Readiness: audit path writable + signing key loaded."""
+        errs: list[str] = []
+        try:
+            p = Path(audit_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            if not os.access(p.parent, os.W_OK):
+                errs.append(f"audit parent not writable: {p.parent}")
+        except OSError as e:
+            errs.append(f"audit path: {e}")
+        try:
+            _ = kernel.public_key_hex()
+        except Exception as e:  # noqa: BLE001
+            errs.append(f"signing key: {e}")
+        ok = not errs
+        return {
+            "status": "ready" if ok else "not_ready",
+            "errors": errs,
+            "key_persisted": bool(key_path),
+        }
 
     @app.get("/v1/pubkey")
     def pubkey() -> dict[str, str]:
@@ -103,17 +124,34 @@ def create_app() -> FastAPI:
         threat = a.pop("threat_class", None)
         result = kernel.decide(a, threat)
         d = result["decision"]
-        cap = a.get("capability") or f"tool:{a.get('tool', '')}"
-        entry = audit.record(a.get("actor", ""), cap.split("tool:")[-1], d["verdict"], d["reason"])
+        # Audit the caller-named tool — do not rewrite identity from capability
+        # when capability≠tool (that case is already a DENY).
+        tool_name = a.get("tool") or ""
+        try:
+            entry = audit.record(
+                a.get("actor", ""), tool_name, d["verdict"], d["reason"]
+            )
+        except OSError as e:
+            # Fail closed: never return a live signed token if the audit sink died.
+            raise HTTPException(
+                status_code=503, detail=f"audit sink unavailable: {e}"
+            ) from e
         metrics[d["verdict"]] += 1
         log.info(f"decide actor={a.get('actor')} verdict={d['verdict']} seq={entry['seq']}")
         return DecisionOut(
-            decision=d, signature=result["signature"], token=result["token"],
+            decision=d,
+            signature=result["signature"],
+            token=result["token"],
             audit_seq=entry["seq"],
         )
 
     @app.get("/v1/audit")
     def get_audit(limit: int = 100) -> list[dict[str, Any]]:
+        if not expose_audit:
+            raise HTTPException(
+                status_code=404,
+                detail="audit dump disabled (set DECISION_OS_EXPOSE_AUDIT=1 to enable)",
+            )
         return audit.entries()[-limit:]
 
     @app.get("/v1/audit/verify")
@@ -124,6 +162,7 @@ def create_app() -> FastAPI:
     def prometheus_metrics() -> Any:
         from fastapi.responses import PlainTextResponse
 
+        # Verdict counters only — never label with actor/tool/payload.
         lines = [
             "# HELP decision_os_decisions_total Decisions issued, by verdict.",
             "# TYPE decision_os_decisions_total counter",

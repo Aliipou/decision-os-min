@@ -11,9 +11,9 @@ into one `handle()` call.**
 > system in the classic sense. It's a research-*oriented* architecture: its
 > advantages over existing tools are not yet proven by independent evaluation.
 
-> **Legitimacy ⊥ Authority — the system is BOTH layers, and both are the theory
-> made executable.** This is not "just a legitimacy filter" and not "just neutral
-> plumbing." Two independent layers, both derived from the theory:
+> **Legitimacy ⊥ Authority — two enforced layers of one engineered moral order**
+> (see [`contracts-spec/POSITIONING.md`](../contracts-spec/POSITIONING.md)). This is not "just a legitimacy
+> filter" and not "just neutral plumbing." Two independent layers:
 > - **FDK — legitimacy** (ownership / consent / verifier): *should this happen at
 >   all?* A **DENY-only** gate. Runs **first**.
 > - **AuthGate — authority** (delegated machine property rights: tool-permission +
@@ -40,6 +40,38 @@ content** and mints a **one-time** capability token; the executor (PEP) runs an
 effect ONLY against that signed, bound decision and unspent token; every decision
 is appended to **one** tamper-evident hash-chained log. That is the whole security
 model — in ~400 lines, stdlib + `cryptography` only.
+
+## Status — infrastructure claims (2026-08-23)
+
+Do **not** read “AI infrastructure” as “fully non-bypassable.” Claims are sliced:
+
+| Layer | Claim | Status |
+|---|---|---|
+| Decision core / PEP / composition | Signed authority + audit + red-team regressions | **PASS** (in-repo tests) |
+| **TM-H** Hosted agent plane | Host-registered effects only via Intent → Admission→FDK→Auth→PEP | **PASS** — `docs/HOSTED_AGENT_PLANE.md` |
+| **TM-A-v1 FS/NET** | No durable FS write / outbound net / ambient product creds under Docker profile | **PASS** — `sandbox/` |
+| **AgentCreatedProcess + W^X/ptrace** | After `lock_and_run` | **PASS** under declared Linux/Docker profile |
+| **TM-A full** `DirectEffect(Agent)=∅` | Absolute ambient isolation | **PARTIAL** — breakout/Host residuals |
+| SealedRuntime alone vs ambient Python | In-process sealing stops sealed-surface bypasses; ambient `open`/`socket` still exist without OS jail | intentional limit |
+
+Threat-model source of truth: [`docs/THREAT_MODELS.md`](docs/THREAT_MODELS.md).
+
+### Earlier composition / red-team results (still held)
+
+Three claims tested earlier. One held, one corrected, one falsified and fixed twice:
+
+**1. Pipeline order is NOT a security meet.** Composition is the meet of a bounded
+verdict lattice (`ALLOW ≺ LIMIT ≺ CONTAIN ≺ DEFER ≺ DENY`); order is performance.
+
+**2. Stacking two engines that each mint is incorrect** — compose before mint.
+See `tests/test_authority_convergence.py`.
+
+**3. “Untrusted evaluator can at worst deny” was FALSE twice** — closed; kept as
+regressions in `tests/test_redteam_composition.py` and `tests/test_redteam_round2.py`.
+
+**Conformance:** Authority Enforcement Profile (`contracts-spec/conformance/`).
+AE-4/AE-5 use a macaroon-inspired attenuation graph (`decision_os_min/attenuation.py`)
+— caveats only narrow; child expiry clamped to parent.
 
 ## How it flows
 
@@ -76,11 +108,11 @@ fewer layers, same gate-passes.
 
 ## Govern your agent's tools — signed authorization + audit
 
-The wedge: **safe tool execution for production AI agents.** You write a policy
-once and wrap your tool registry; from then on there is **no way to call a tool
-that skips the kernel** — the wrapped callable *is* the governed tool. (Not
-literally "one line": you define a policy, create a `Governor`, wrap your tools,
-and set the agent identity — a handful of lines, shown below.)
+The wedge: **governed tool execution for AI agents** under an explicit threat model.
+You write a policy and wrap tools / use the Hosted plane; host-registered effects
+cannot skip Admission→legitimacy→authority→PEP. **Ambient OS effects** (files,
+sockets, subprocess) are **not** closed by the Python library alone — use the
+Docker + `lock_and_run` profile (`sandbox/`) for TM-A slices.
 
 ```python
 from decision_os_min import Governor, set_actor, GovernanceRefused
@@ -138,22 +170,33 @@ curl -X POST localhost:8080/v1/decide -H 'content-type: application/json' \
 # -> {"decision":{"verdict":"ALLOW",...},"signature":"...","token":{...},"audit_seq":0}
 ```
 
-Endpoints: `POST /v1/decide` (signed decision + audit), `GET /v1/pubkey` (verify
-key), `GET /v1/audit` + `/v1/audit/verify` (tamper-evident trail), `GET /healthz`,
-`GET /metrics`, `GET /openapi.json`. The service is the **authority + audit** — it
-does not execute your tools; the caller's PEP enforces the verdict + one-time
-token locally.
+Endpoints: `POST /v1/decide`, `GET /v1/pubkey`, `GET /v1/audit` + `/v1/audit/verify`
+(audit dump off unless `DECISION_OS_EXPOSE_AUDIT=1`), `GET /healthz`, `GET /readyz`,
+`GET /metrics`, `GET /openapi.json`. Authority + audit only — caller's PEP executes.
 
-Docker:
+Docker / Compose:
 
 ```bash
+docker compose up --build -d
+curl -s localhost:8080/readyz
+# or:
 docker build -t decision-os-min .
-docker run -p 8080:8080 -v $PWD/policy.json:/config/policy.json \
-  -e DECISION_OS_POLICY=/config/policy.json decision-os-min
+docker run -p 8080:8080 -v $PWD/deploy/policy.json:/config/policy.json \
+  -e DECISION_OS_POLICY=/config/policy.json \
+  -e DECISION_OS_KEY_FILE=/data/kernel_ed25519.pem decision-os-min
 ```
 
-**This is a *starter*, not production-grade.** Auth, TLS, rate limiting, and
-horizontal scale belong at the ingress in front of it (see Out of Scope).
+See [`INFRA.md`](INFRA.md). **Starter, not production-grade** — auth/TLS/rate limits at ingress.
+
+## Hosted agents + OS isolation
+
+```text
+Untrusted agent  --Intent IPC-->  AgentHost (SealedRuntime + adapters)
+     optional: Docker agent-noambient-v1 + lock_and_run
+```
+
+- Host plane: `decision_os_min.host`, `docs/HOSTED_AGENT_PLANE.md`
+- Agent sandbox: `sandbox/README.md`, `docs/THREAT_MODELS.md`
 
 ## Extending it (plugins)
 

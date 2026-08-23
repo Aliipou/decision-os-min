@@ -8,13 +8,9 @@ Two *different* questions, two layers, one invariant:
     LEGITIMACY may only DENY — it can never GRANT authority.
     AUTHORITY may never OVERRIDE a legitimacy DENY.
 
-This is enforced by *structure*, not convention: the legitimacy check returns only
-`(ok, reason)`. A `False` refuses before the kernel is ever consulted; a `True`
-merely *permits the question to proceed* — it grants nothing. The kernel (authority)
-runs only after legitimacy passes, so it cannot resurrect a denied action.
-
-Value-neutral: the legitimacy *rule* is injected policy (FDK, a regulation, a
-research theory) — never baked into the kernel. The kernel supplies the seam.
+Structurally this pipeline is now a thin convenience over co-equal composition:
+legitimacy is adapted via ``evaluators.legitimacy`` and folded by lattice meet
+inside ``DecisionOS.handle``. Exceptions and veto reasons match the composed form.
 """
 
 from __future__ import annotations
@@ -48,22 +44,7 @@ class LegitimacyAuthorityPipeline:
         action: dict[str, Any],
         tools: dict[str, Callable[[dict[str, Any]], Any]],
     ) -> Any:
-        from decision_os_min import Outcome  # lazy: defined in __init__
+        from decision_os_min.evaluators import legitimacy as adapt
 
-        # STAGE 1 — LEGITIMACY: "should this action happen at all?"  (may only DENY)
-        if self._legitimacy is not None:
-            ok, reason = self._legitimacy(action)
-            if not ok:
-                # A legitimacy denial is final. Authority is never consulted, so it
-                # cannot override it. Recorded as a decision.
-                cap = action.get("capability") or f"tool:{action.get('tool', '')}"
-                self._authority.log.record(
-                    action.get("actor", ""), cap.split("tool:")[-1],
-                    "DENY", f"illegitimate: {reason}",
-                )
-                return Outcome(verdict="DENY", executed=False,
-                               refused_reason=f"illegitimate: {reason}")
-
-        # STAGE 2 — AUTHORITY: "does this actor hold the capability?"  (+ PEP + audit)
-        # Legitimacy passing does NOT grant anything; the kernel still decides.
-        return self._authority.handle(action, tools)
+        evaluators = [adapt(self._legitimacy)] if self._legitimacy is not None else None
+        return self._authority.handle(action, tools, evaluators=evaluators)

@@ -1,23 +1,27 @@
-"""The forced path: a governed tool cannot execute without the kernel.
+"""Adoption wrapper: calls to the *returned* callable go through the kernel.
 
-This is the adoption surface — the "one line" that turns Decision OS from an
-optional library into the *path of least resistance*. You wrap a tool once; from
-then on there is **no way to call it that bypasses the kernel**, because the
-wrapped callable IS the governed tool. Removing governance means deleting the
-wrapper and losing your audit trail — the friction runs the right direction.
+This is friction, not a security boundary. It does **not** make execution
+non-bypassable at process/OS scope:
+
+* ``functools.wraps`` exposes ``__wrapped__`` — calling it skips the kernel.
+* Any retained reference to the original ``fn`` skips the kernel.
+* ``set_actor`` is caller-controlled context, not authentication.
+* Legitimacy evaluators are optional unless the host wires them.
+
+Removing the wrapper loses the audit trail for that entry point only. See
+``docs/BYPASS_INVARIANTS.md`` and ``tests/test_bypass_invariants.py``.
 
     gov = Governor(policy, audit_path="audit.jsonl")
 
     @gov.tool("send_email", capability="tool:send_email", purpose="support_reply",
               data_labels=["customer_support"])
     def send_email(to: str, body: str) -> str:
-        ...                      # only ever runs if the kernel permits it
+        ...                      # runs only if THIS wrapper is what gets called
 
-    set_actor("agent:bot")       # admission/identity — set by your app per agent
-    send_email(to="x", body="y") # routed through decide -> audit -> execute
+    set_actor("agent:bot")       # admission hint — NOT verified identity
+    send_email(to="x", body="y") # decide -> audit -> execute, or GovernanceRefused
 
-The wrapper holds no authority: the kernel decides, this only makes the kernel
-unavoidable. The core is untouched — `govern.py` only consumes it.
+The wrapper holds no authority. The core is untouched — ``govern.py`` only consumes it.
 """
 
 from __future__ import annotations
@@ -50,10 +54,20 @@ class GovernanceRefused(RuntimeError):
 
 
 class Governor:
-    def __init__(self, policy: dict[str, Any], *, audit_path: str) -> None:
+    def __init__(
+        self,
+        policy: dict[str, Any],
+        *,
+        audit_path: str,
+        evaluators: list[Callable[[dict[str, Any]], dict[str, Any] | str]] | None = None,
+    ) -> None:
         from decision_os_min import DecisionOS  # lazy: DecisionOS lives in __init__
 
         self._dos = DecisionOS(policy, audit_path=audit_path)
+        # Co-equal governance evaluators (e.g. an FDK legitimacy evaluator). Their
+        # DENY is authoritative and cannot be overridden by authority — see
+        # kernel.decide / COMPOSITION.md. Default: none (authority only).
+        self._evaluators = evaluators
 
     @property
     def public_key(self) -> str:
@@ -82,7 +96,9 @@ class Governor:
                     "payload": payload,
                     "nonce": uuid.uuid4().hex[:12],
                 }
-                outcome = self._dos.handle(action, {name: lambda p: fn(**p)})
+                outcome = self._dos.handle(
+                    action, {name: lambda p: fn(**p)}, evaluators=self._evaluators
+                )
                 if not outcome.executed:
                     raise GovernanceRefused(outcome.verdict, outcome.refused_reason)
                 return outcome.output

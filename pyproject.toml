@@ -13,7 +13,7 @@ authors = [{ name = "Ali Pourrahim" }]
 dependencies = ["cryptography>=42"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "httpx>=0.27"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "httpx>=0.27", "hypothesis>=6.100"]
 # The deployable HTTP starter (REST + OpenAPI + metrics). Kept OPTIONAL so the
 # core stays dependency-pure (stdlib + cryptography).
 service = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2"]
@@ -35,7 +35,7 @@ select = ["E", "F", "I", "B", "UP"]
 # E501 (line length) is relaxed for tests, runnable examples, and benchmarks:
 # these contain wide literal data rows where wrapping hurts readability.
 "tests/**" = ["E501"]
-"examples/**" = ["E501"]
+"examples/**" = ["E501", "E402"]
 "bench/**" = ["E501"]
 
 [tool.mypy]
@@ -45,3 +45,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Windows: default %TEMP%\pytest-of-* can hit WinError 5 (access denied).
+addopts = "--basetemp=.pytest-basetemp"
+markers = [
+  "tm_a: OS-isolation / DirectEffect(Agent)=∅ under declared sandbox profile",
+]

@@ -4,9 +4,14 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+.pytest-basetemp/
+*.pytest-basetemp/
+.pytest-tmp/
 .ruff_cache/
 .mypy_cache/
 .venv/
 # runtime audit logs (the service default writes here)
 audit.jsonl
 *.jsonl
+.coverage
+.hypothesis/

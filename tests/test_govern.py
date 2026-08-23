@@ -44,13 +44,15 @@ def test_unpermitted_actor_is_refused(gov):
 
 
 def test_there_is_no_bypass_the_wrapper_is_the_tool(gov):
+    """Adoption-scoped only: the *governed* callable routes through the kernel.
+
+    This does NOT prove process/OS non-bypassability. Holding the original
+    implementation still executes effects — see test_bypass_invariants.py BI-1/BI-1b.
+    """
     send_email = _send_email(gov)
-    # The only callable a consumer holds is the governed one; calling it always
-    # routes through the kernel. There is no ungoverned reference to reach.
     set_actor("agent:ghost")
     with pytest.raises(GovernanceRefused):
         send_email(to="x", body="y")
-    # ...and every governed call is audited.
     assert gov._dos.log.verify() is True and len(gov._dos.log.entries()) == 1
 
 

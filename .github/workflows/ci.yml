@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**"]
   pull_request:
 
 jobs:
@@ -24,9 +24,31 @@ jobs:
       - name: Types (mypy)
         run: mypy decision_os_min
       - name: Tests (pytest)
-        run: pytest -q
+        run: pytest -q --ignore=tests/test_os_isolation.py
         env:
           AUTHGATE_BACKEND: python
+
+  tm-a-isolation:
+    name: TM-A OS isolation (agent-noambient-v1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Build agent sandbox image
+        run: docker build -t decision-os-agent:noambient-v1 -f sandbox/Dockerfile.agent sandbox/
+      - name: Run TM-A sandbox probes
+        run: bash sandbox/run_tm_a_probes.sh
+        env:
+          AGENT_SANDBOX_IMAGE: decision-os-agent:noambient-v1
+      - name: Pytest TM-A markers
+        run: pytest -q -m tm_a tests/test_os_isolation.py
+        env:
+          AUTHGATE_BACKEND: python
+          AGENT_SANDBOX_IMAGE: decision-os-agent:noambient-v1
 
   docker:
     runs-on: ubuntu-latest
@@ -36,9 +58,21 @@ jobs:
         run: docker build -t decision-os-min:ci .
       - name: Smoke-test the container
         run: |
+          set -euo pipefail
           docker run -d --name dos -p 8080:8080 decision-os-min:ci
-          for i in $(seq 1 20); do
-            curl -sf http://localhost:8080/healthz && break || sleep 1
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/healthz; then
+              ok=1
+              break
+            fi
+            sleep 1
           done
-          curl -sf http://localhost:8080/healthz
+          if [ "$ok" != 1 ]; then
+            echo "=== docker logs ==="
+            docker logs dos || true
+            docker rm -f dos || true
+            exit 1
+          fi
+          curl -sf http://127.0.0.1:8080/readyz | tee /tmp/readyz.json
           docker rm -f dos

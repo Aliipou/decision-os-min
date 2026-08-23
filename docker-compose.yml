@@ -1,0 +1,33 @@
+# Infra-ready starter stack for decision-os-min (authority + audit HTTP service).
+# Put TLS/auth/rate-limits at the ingress in front of this.
+
+services:
+  decision-os:
+    build: .
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      DECISION_OS_POLICY: /config/policy.json
+      DECISION_OS_AUDIT: /data/audit.jsonl
+      DECISION_OS_KEY_FILE: /data/kernel_ed25519.pem
+      DECISION_OS_EVALUATOR_TIMEOUT_S: "1.0"
+      DECISION_OS_LOG_LEVEL: INFO
+    volumes:
+      - ./deploy/policy.json:/config/policy.json:ro
+      - decision_os_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz')",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  decision_os_data:

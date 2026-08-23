@@ -7,10 +7,13 @@ stdlib + cryptography only.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -19,17 +22,35 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+)
+
+from .attenuation import AuthorityGraph, Macaroon
+
+# Verdicts + the meet/compose primitives live in compose.py (the base module with
+# no internal deps). Imported here and re-exported, so existing callers that do
+# `from .kernel import DENY, PERMITTING, ...` keep working unchanged.
+from .compose import (
+    ALLOW,
+    CONTAIN,
+    DENY,
+    LIMIT,
+    PERMITTING,
+    Evaluator,
+    as_decision,
+    more_restrictive,
+    sanitize,
+)
 
 # An advisor is an OPTIONAL plugin: given an action, it may suggest a threat
 # class (e.g. "malicious"). It is advice, never authority — the kernel decides.
 Advisor = Callable[[dict[str, Any]], "str | None"]
 
 KERNEL_IDENTITY = "decision-os-min-kernel"
-
-# Verdicts. ALLOW=as-is, DENY=refuse, LIMIT=minimized payload, CONTAIN=sandbox
-# (advisory-driven), DEFER=escalate. PERMITTING mint a token.
-ALLOW, DENY, LIMIT, CONTAIN, DEFER = "ALLOW", "DENY", "LIMIT", "CONTAIN", "DEFER"
-PERMITTING = {ALLOW, LIMIT, CONTAIN}
 
 _CONTAINMENT = {"sandbox": True, "network": "none", "allowed_tools": [], "time_limit_seconds": 5}
 
@@ -126,20 +147,93 @@ def verify(obj: dict[str, Any], signature_hex: str, public_key_hex: str) -> bool
         return False
 
 
+def load_or_create_signing_key(path: str | None) -> Ed25519PrivateKey:
+    """Infra: persist the kernel signing key across restarts.
+
+    Without persistence every container restart mints a new key and every prior
+    decision signature becomes unverifiable. If ``path`` is set, load PEM from
+    that file or create+write one (mode 0600 when the OS supports it).
+    """
+    if not path:
+        return Ed25519PrivateKey.generate()
+    from pathlib import Path
+
+    p = Path(path)
+    if p.is_file():
+        data = p.read_bytes()
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+        key = load_pem_private_key(data, password=None)
+        if not isinstance(key, Ed25519PrivateKey):
+            raise TypeError(f"{path}: expected an Ed25519 private key PEM")
+        return key
+    key = Ed25519PrivateKey.generate()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    pem = key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+    p.write_bytes(pem)
+    try:
+        p.chmod(0o600)
+    except OSError:
+        pass
+    return key
+
+
 class Kernel:
     """The sole decision authority: holds the signing key and the policy."""
 
-    def __init__(self, policy: dict[str, Any], _key: Ed25519PrivateKey | None = None) -> None:
-        self._key = _key or Ed25519PrivateKey.generate()
+    def __init__(
+        self,
+        policy: dict[str, Any],
+        _key: Ed25519PrivateKey | None = None,
+        *,
+        key_path: str | None = None,
+        evaluator_timeout_s: float | None = 1.0,
+    ) -> None:
+        self._key = _key or load_or_create_signing_key(key_path)
         self._pub = self._key.public_key().public_bytes_raw().hex()
         self._grants: dict[str, list[str]] = policy.get("grants", {})
         self._bindings: dict[str, list[str]] = policy.get("purpose_bindings", {})
         self._redactions: list[dict[str, Any]] = policy.get("redactions", [])
         self._contain: set[str] = set(policy.get("contain_threat_classes", ["malicious"]))
         self._default_deny: bool = policy.get("default", "deny") == "deny"
+        # I4: bound untrusted evaluator runtime (default 1s). ``None`` = in-process
+        # and unbounded (legacy / deliberate). Overridable per ``decide(...)``.
+        self._evaluator_timeout_s = evaluator_timeout_s
+        # AE-4 / AE-5: macaroon-inspired attenuation graph. Root grants mirror the
+        # flat policy map so existing callers keep working; `delegate()` adds
+        # attenuated children that cannot amplify tools or outlive their parent.
+        self.authority = AuthorityGraph()
+        self.authority.set_root_grants(self._grants)
+
+    def public_key_pem(self) -> str:
+        return self._key.public_key().public_bytes(
+            Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
+        ).decode("ascii")
 
     def public_key_hex(self) -> str:
         return self._pub
+
+    def grant(self, actor: str, capability: str) -> None:
+        """Explicit root issuance — the only operation that raises authority."""
+        self._grants.setdefault(actor, [])
+        if capability not in self._grants[actor]:
+            self._grants[actor].append(capability)
+        self.authority.grant(actor, capability)
+
+    def revoke(self, actor: str, capability: str) -> None:
+        self._grants[actor] = [c for c in self._grants.get(actor, []) if c != capability]
+        self.authority.revoke(actor, capability)
+
+    def delegate(
+        self,
+        parent: str,
+        child: str,
+        tools: list[str],
+        *,
+        expires_at: datetime | None = None,
+    ) -> Macaroon:
+        """Attenuating delegation (AE-4 / AE-5). See ``attenuation.AuthorityGraph``."""
+        return self.authority.delegate(parent, child, tools, expires_at=expires_at)
 
     def _sign(self, obj: dict[str, Any]) -> str:
         return self._key.sign(_canonical(obj)).hex()
@@ -156,9 +250,8 @@ class Kernel:
         # ambiguity: capability and tool must agree if both are given.
         if action.get("capability") and tool and action["capability"] != f"tool:{tool}":
             return d(DENY, f"ambiguous: capability '{action['capability']}' != tool '{tool}'")
-        # capability gate.
-        grants = self._grants.get(actor, [])
-        if "*" not in grants and cap not in grants:
+        # capability gate — root grant OR a live attenuated macaroon (AE-4/AE-5).
+        if not self.authority.holds(actor, cap):
             return d(DENY, f"actor '{actor}' lacks capability '{cap}'")
         # purpose binding — a hard DENY here DOMINATES containment (advisory never
         # loosens a verdict).
@@ -170,11 +263,17 @@ class Kernel:
                 continue
             if action.get("action_purpose") not in allowed:
                 return d(DENY, f"purpose mismatch: '{label}' != '{action.get('action_purpose')}'")
-        # containment — only for otherwise-permitted actions.
-        if threat_class in self._contain:
-            return d(CONTAIN, f"threat '{threat_class}' -> sandbox", containment=dict(_CONTAINMENT))
-        # data minimization -> LIMIT.
+        # Data minimization is an OBLIGATION, not a verdict. Compute it FIRST so it
+        # survives whatever verdict this action ends up with. It used to be computed
+        # AFTER the containment return, so a CONTAIN decision carried no
+        # transformed_payload and the redaction was silently dropped. That was latent
+        # rather than harmless: the default containment allowlist is empty, so CONTAIN
+        # executes nothing and nothing leaks — but an empty allowlist also makes
+        # CONTAIN operationally equivalent to DENY. The first operator to allowlist
+        # the tool (i.e. to make CONTAIN do its actual job) would have had the raw
+        # payload delivered into the sandbox. Verdict and obligation are orthogonal.
         payload = dict(action.get("payload") or {})
+        redacted: list[str] = []
         for rule in self._redactions:
             if rule.get("action_purpose") != action.get("action_purpose"):
                 continue
@@ -182,7 +281,23 @@ class Kernel:
             if hit:
                 for f in hit:
                     payload[f] = "[REDACTED]"
-                return d(LIMIT, f"redacted {sorted(hit)}", transformed_payload=payload)
+                redacted = sorted(hit)
+                break
+        obligations: dict[str, Any] = {"transformed_payload": payload} if redacted else {}
+
+        # containment — only for otherwise-permitted actions. It CARRIES the
+        # redaction: a sandbox constrains egress and lifetime, not what the tool is
+        # shown.
+        if threat_class in self._contain:
+            return d(
+                CONTAIN,
+                f"threat '{threat_class}' -> sandbox"
+                + (f"; redacted {redacted}" if redacted else ""),
+                containment=dict(_CONTAINMENT),
+                **obligations,
+            )
+        if redacted:
+            return d(LIMIT, f"redacted {redacted}", **obligations)
         return d(ALLOW, "all checks passed")
 
     def decide(
@@ -191,6 +306,8 @@ class Kernel:
         threat_class: str | None = None,
         *,
         advisor: Advisor | None = None,
+        evaluators: list[Evaluator] | None = None,
+        evaluator_timeout: float | None | object = ...,
     ) -> dict[str, Any]:
         """Return {decision, signature, token}. The decision and token both bind
         the action fingerprint; token is None for non-permitting verdicts.
@@ -198,12 +315,112 @@ class Kernel:
         `advisor` is an OPTIONAL plugin (e.g. an FDK threat classifier). Without
         it the kernel works fully; with it the kernel CONSULTS its suggestion but
         still makes the call. `advisor` takes precedence over an explicit
-        `threat_class` when both are given."""
+        `threat_class` when both are given.
+
+        `evaluators` are OPTIONAL **co-equal** governance evaluators (e.g. an FDK
+        legitimacy evaluator, and later safety/privacy/cost/...). Unlike an
+        advisor — which can only *suggest* a threat class the kernel may map to
+        CONTAIN — an evaluator returns a full verdict, and its DENY is
+        AUTHORITATIVE: we compose this kernel's own authority verdict with every
+        evaluator's verdict by the lattice meet (most-restrictive-wins, DENY
+        absorbing) BEFORE minting any token. So authority ∧ legitimacy ∧ … must
+        all permit, no side can override another's DENY, and (Invariant: token
+        mint only after the composed verdict) no capability is minted for an
+        action a later evaluator vetoes. Composition is commutative/associative,
+        so evaluator order carries no meaning — only latency.
+
+        `evaluator_timeout` bounds each evaluator call in seconds (default:
+        ``self._evaluator_timeout_s``, typically 1.0). Pass ``None`` for
+        unbounded in-process evaluation."""
         if advisor is not None:
             threat_class = advisor(action)
+        # AUTHORITY: this kernel's own capability/purpose ruling.
         decision = self._evaluate(action, threat_class)
+        # CO-EQUAL EVALUATORS: fold each verdict in by meet, deny-dominant. This
+        # happens before issued_by/binding/mint below, so the token (minted only
+        # on a PERMITTING composed verdict) can never precede the composition.
+        #
+        # Three defences make the antitone/veto-only claim true rather than merely
+        # argued (see COMPOSITION.md §11 for the exploits that motivated each):
+        #   R3 — each evaluator sees a DEEP COPY, so it cannot mutate the action
+        #        that authority already ruled on (a plugin used to be able to
+        #        rewrite `capability` and have an ungranted tool execute under a
+        #        perfectly valid signature, because the fingerprint is taken from
+        #        the action AFTER this loop). A private copy each also stops one
+        #        evaluator from hiding an attribute from the next.
+        #   R1 — `sanitize` strips the evaluator's dict to {verdict, reason},
+        #        so it cannot inject token/capability/payload/containment fields.
+        #   I4 — a raising or timing-out evaluator DENIES rather than propagating
+        #        out of `decide()`. Plugin-raised SystemExit/KeyboardInterrupt is
+        #        also DENY (fail-closed against plugin abuse). True process shutdown
+        #        still works when those exceptions are raised outside this seam.
+        #        GeneratorExit still propagates. Optional evaluator_timeout bounds hangs.
+        timeout: float | None = (
+            self._evaluator_timeout_s if evaluator_timeout is ... else evaluator_timeout  # type: ignore[assignment]
+        )
+        leg_digests: list[str] = []
+        axiom_acc: list[str] = []
+        for evaluate in evaluators or ():
+            try:
+                if timeout is None:
+                    out = evaluate(copy.deepcopy(action))
+                else:
+                    # Run off-thread so (a) we can bound wall time and (b) an
+                    # in-process evaluator cannot frame-walk to self._key.
+                    # shutdown(wait=False): do not block on a timed-out sleeper.
+                    pool = ThreadPoolExecutor(max_workers=1)
+                    try:
+                        fut = pool.submit(evaluate, copy.deepcopy(action))
+                        try:
+                            out = fut.result(timeout=timeout)
+                        except FuturesTimeoutError:
+                            out = {
+                                "verdict": DENY,
+                                "reason": f"evaluator timeout (fail-closed): {timeout}s",
+                            }
+                    finally:
+                        pool.shutdown(wait=False, cancel_futures=True)
+            except Exception as exc:
+                out = {"verdict": DENY, "reason": f"evaluator error (fail-closed): {exc}"}
+            except BaseException as exc:
+                # Plugin-raised SystemExit/KeyboardInterrupt -> DENY. Re-raise
+                # GeneratorExit so generator cleanup is not swallowed.
+                if isinstance(exc, GeneratorExit):
+                    raise
+                out = {
+                    "verdict": DENY,
+                    "reason": (
+                        f"evaluator BaseException (fail-closed): "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                }
+            decision = more_restrictive(decision, sanitize(as_decision(out, action)))
+            # M5 accumulation: digests/axioms from evaluator output BEFORE sanitize
+            # (sanitize still admits them; we also record for binding even if meet
+            # later drops a non-governing evaluator's reason).
+            if isinstance(out, dict):
+                dig = out.get("legitimacy_digest")
+                if isinstance(dig, str) and dig:
+                    leg_digests.append(dig)
+                ax = out.get("axiom_ids")
+                if isinstance(ax, (list, tuple)):
+                    axiom_acc.extend(str(a) for a in ax)
         decision["issued_by"] = KERNEL_IDENTITY
         decision["action_binding"] = action_fingerprint(action)
+        # M5: cryptographic binding of legitimacy evidence into the signed decision.
+        if leg_digests or axiom_acc:
+            decision["legitimacy_digest"] = leg_digests[-1] if leg_digests else ""
+            decision["axiom_ids"] = sorted(set(axiom_acc))
+            decision["legitimacy_binding"] = hashlib.sha256(
+                _canonical(
+                    {
+                        "action_binding": decision["action_binding"],
+                        "legitimacy_digest": decision["legitimacy_digest"],
+                        "axiom_ids": decision["axiom_ids"],
+                        "verdict": decision["verdict"],
+                    }
+                )
+            ).hexdigest()
         token = None
         if decision["verdict"] in PERMITTING:
             # Fold the one-time capability grant INTO the decision so a SINGLE
@@ -225,5 +442,6 @@ class Kernel:
                 "action_binding": decision["action_binding"],
                 "issued_by": KERNEL_IDENTITY,
                 "expires_at": decision["token_expires_at"],
+                "legitimacy_binding": decision.get("legitimacy_binding"),
             }
         return {"decision": decision, "signature": signature, "token": token}

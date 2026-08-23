@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .kernel import CONTAIN, DEFER, DENY, LIMIT, action_fingerprint, verify
+from .compose import CONTAIN, LIMIT, PERMITTING
+from .kernel import action_fingerprint, verify
 from .spentstore import FileSpentStore, SpentStore, SpentStoreUnavailable
 
 
@@ -101,6 +102,13 @@ class Executor:
         # audit is written even when the decision is malformed.
         actor = action.get("actor", "") if isinstance(action, dict) else ""
         cap = decision.get("capability") if isinstance(decision, dict) else None
+        # AE-10: the kernel sets `capability` only on PERMITTING verdicts, so a
+        # refused action used to be logged with tool="" — the record could not say
+        # WHAT was refused. Fall back to the action's own tool/capability.
+        if not cap and isinstance(action, dict):
+            cap = action.get("capability") or (
+                f"tool:{action['tool']}" if action.get("tool") else None
+            )
         tool_for_audit = (cap or "").split("tool:")[-1] if cap else ""
         verdict_for_audit = decision.get("verdict", "") if isinstance(decision, dict) else ""
         reason_for_audit = decision.get("reason", "") if isinstance(decision, dict) else ""
@@ -110,11 +118,18 @@ class Executor:
         except ExecutionRefused as e:
             # HB-3 + W-3: one audit entry even on refusal — executed=False, with
             # the reason the effect did not run.
+            # AE-10 (audit fidelity): the RECORDED reason must be the reason the
+            # decision was made, not merely the mechanical consequence. This used
+            # to log only `refused: verdict DENY: no execution`, discarding the
+            # vetoing evaluator's reason entirely — so an audit could never answer
+            # "who vetoed this, and why". That is the one channel a veto-only
+            # evaluator still owns (COMPOSITION.md §11 strips it of every other),
+            # which made discarding it precisely the wrong field to drop.
             self._audit.record(
                 actor,
                 tool_for_audit,
                 verdict_for_audit,
-                f"refused: {e}",
+                f"{reason_for_audit} [refused: {e}]" if reason_for_audit else f"refused: {e}",
                 executed=False,
                 payload_digest=None,
             )
@@ -162,7 +177,12 @@ class Executor:
             )
 
         verdict = decision["verdict"]
-        if verdict in (DENY, DEFER) or not decision.get("token_id"):
+        # R2: gate on the PERMITTING WHITELIST, not on a blacklist of two verdicts.
+        # The old test was `verdict in (DENY, DEFER) or not token_id`, which let any
+        # verdict outside that pair through as long as a `token_id` was present —
+        # and a plugin could inject one. Lowercase `"deny"` (a neighbouring engine's
+        # dialect) was neither DENY nor DEFER, so a refusal executed.
+        if verdict not in PERMITTING or not decision.get("token_id"):
             raise ExecutionRefused(f"verdict {verdict}: no execution")
 
         # Token semantics enforced from the SIGNED decision fields: expiry + a
@@ -192,7 +212,23 @@ class Executor:
         fn = tools.get(tool_name)
         if fn is None:
             raise ExecutionRefused(f"no executor registered for tool '{tool_name}'")
-        payload = decision.get("transformed_payload") if verdict == LIMIT else action.get("payload")
+        if verdict == LIMIT and "transformed_payload" not in decision:
+            # An obligation the PEP cannot discharge must REFUSE, not degrade. A
+            # LIMIT means "run, but minimized"; with no minimized payload attached
+            # the old code fell back to `{}` and called the tool with no arguments
+            # — a DIFFERENT effect, not a more restrictive one. This is reachable
+            # now that evaluator obligations are stripped (COMPOSITION.md §11), so
+            # an evaluator's LIMIT collapses to a clean veto, which is exactly what
+            # a veto-only plugin is allowed to be.
+            raise ExecutionRefused("LIMIT without a transformed_payload: refusing")
+        # Apply the minimized payload whenever the signed decision carries one — not
+        # only when the verdict happens to be LIMIT. Gating on the verdict meant a
+        # CONTAIN decision discarded a redaction the kernel had already computed.
+        payload = (
+            decision["transformed_payload"]
+            if "transformed_payload" in decision
+            else action.get("payload")
+        )
         payload = payload or {}
         self._last_payload_digest = _payload_digest(payload)
         return fn(payload)

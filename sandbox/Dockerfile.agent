@@ -1,0 +1,5 @@
+# Minimal agent image: Python + libseccomp for post-bootstrap lockdown.
+FROM python:3.12-slim-bookworm
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libseccomp2 \
+    && rm -rf /var/lib/apt/lists/*
