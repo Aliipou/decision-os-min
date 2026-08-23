@@ -158,28 +158,34 @@ class AgentHost:
             "error": ev.error,
         }
 
+    def handle_ipc_line(self, line: str) -> str:
+        """Validate one untrusted JSONL frame and return one result frame."""
+        try:
+            msg = json.loads(line)
+            if not isinstance(msg, dict):
+                raise ValueError("IPC frame must be a JSON object")
+            if msg.get("type") == "ping":
+                resp = {"v": PROTOCOL, "type": "pong"}
+            else:
+                resp = self.handle_wire(msg)
+        except Exception as exc:
+            resp = {
+                "v": PROTOCOL,
+                "type": "result",
+                "request_id": "",
+                "ok": False,
+                "output": None,
+                "error": f"host_error: {exc}",
+            }
+        return json.dumps(resp, default=str)
+
     def serve_stdio(self) -> None:
         """Line-delimited JSON IPC on stdin/stdout (host side)."""
         for line in sys.stdin:
             line = line.strip()
             if not line:
                 continue
-            try:
-                msg = json.loads(line)
-                if msg.get("type") == "ping":
-                    resp = {"v": PROTOCOL, "type": "pong"}
-                else:
-                    resp = self.handle_wire(msg)
-            except Exception as exc:
-                resp = {
-                    "v": PROTOCOL,
-                    "type": "result",
-                    "request_id": "",
-                    "ok": False,
-                    "output": None,
-                    "error": f"host_error: {exc}",
-                }
-            sys.stdout.write(json.dumps(resp, default=str) + "\n")
+            sys.stdout.write(self.handle_ipc_line(line) + "\n")
             sys.stdout.flush()
 
 

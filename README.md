@@ -51,6 +51,7 @@ Do **not** read “AI infrastructure” as “fully non-bypassable.” Claims ar
 | **TM-H** Hosted agent plane | Host-registered effects only via Intent → Admission→FDK→Auth→PEP | **PASS** — `docs/HOSTED_AGENT_PLANE.md` |
 | **TM-A-v1 FS/NET** | No durable FS write / outbound net / ambient product creds under Docker profile | **PASS** — `sandbox/` |
 | **AgentCreatedProcess + W^X/ptrace** | After `lock_and_run` | **PASS** under declared Linux/Docker profile |
+| **Combined boundary** | Locked Docker agent → Intent JSONL → outside `AgentHost` → governed host effect | **PASS** — real IPC/destructors in `tests/test_e2e_agent_boundary.py` |
 | **TM-A full** `DirectEffect(Agent)=∅` | Absolute ambient isolation | **PARTIAL** — breakout/Host residuals |
 | SealedRuntime alone vs ambient Python | In-process sealing stops sealed-surface bypasses; ambient `open`/`socket` still exist without OS jail | intentional limit |
 

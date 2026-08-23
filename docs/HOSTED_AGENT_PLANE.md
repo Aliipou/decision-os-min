@@ -34,9 +34,15 @@ no effect adapters                  AuthGate / decision kernel
 | Durable FS write + outbound net + ambient creds | **TM-A-v1 FS/NET** | **PASS** | `tests/test_os_isolation.py` |
 | AgentCreatedProcess after `lock_and_run` | **TM-A process** | **PASS** | unlocked exec=`RAN`, fork=`FORKED` |
 | W^X + ptrace after lock | **TM-A non-exec** | **PASS** | unlocked still `MAPPED`/`EXEC_GRANTED`/`ATTACHED` |
+| Locked agent → Intent IPC → governed host effect | **TM-H + named TM-A slices** | **PASS** | `tests/test_e2e_agent_boundary.py` |
 | Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | breakout / Host / out-of-profile |
 
 See [`THREAT_MODELS.md`](THREAT_MODELS.md), [`SUBPROCESS_BOUNDARY.md`](SUBPROCESS_BOUNDARY.md).
+
+The combined test's sole intentional channel is Docker attach stdin/stdout
+carrying protocol-v1 JSONL. `AgentHost` and its adapter stay on the host. No
+network interface or host/Docker socket is exposed to the container, so this
+request/response pipe is not a general outbound transport.
 
 ## Next milestone
 

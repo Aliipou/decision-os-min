@@ -28,12 +28,27 @@ plus start seccomp (connect/bind) + image with `libseccomp2`.
 
 Helper: `decision_os_min.host.locked_agent_docker_cmd(agent.py)`.
 
+## Intentionally allowed IPC
+
+The combined boundary test allows exactly the container's inherited Docker
+attach **stdin/stdout byte streams**, carrying one line-delimited JSON Intent
+request and one result per exchange. The trusted test runner and `AgentHost`
+remain host processes; no host source, adapter, credential, Unix socket, or
+Docker socket is mounted into the container.
+
+This does not reopen arbitrary network: the agent still runs with
+`--network=none`, the attach streams are already-open file descriptors rather
+than a network interface, and the host parser accepts only protocol-v1 Intent
+objects. Malformed frames and an `adapter_call` bypass frame are rejected.
+`tests/test_e2e_agent_boundary.py` proves the governed host write and all ambient
+destructors in one locked session.
+
 ## Run
 
 ```bash
 docker build -t decision-os-agent:noambient-v1 -f sandbox/Dockerfile.agent sandbox/
 ./sandbox/run_tm_a_probes.sh
-pytest -m tm_a tests/test_os_isolation.py
+pytest -m tm_a tests/test_os_isolation.py tests/test_e2e_agent_boundary.py
 ```
 
 ## Residuals (why TM-A full ≠ PASS)
