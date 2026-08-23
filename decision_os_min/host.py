@@ -22,7 +22,7 @@ import subprocess
 import sys
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -271,6 +271,8 @@ def locked_agent_docker_cmd(
     image: str | None = None,
     seccomp: str | Path | None = None,
     lock_script: str | Path | None = None,
+    agent_args: Sequence[str] = (),
+    wall_timeout_s: int = 10,
 ) -> list[str]:
     """Build ``docker run … lock_and_run.py <agent>`` for TM-A profile.
 
@@ -278,6 +280,8 @@ def locked_agent_docker_cmd(
     Host stays *outside* the agent container (IPC via stdin/stdout or network
     to Host is a deployment choice; default probe uses no network).
     """
+    if wall_timeout_s < 1:
+        raise ValueError("wall_timeout_s must be positive")
     root = Path(__file__).resolve().parents[1]
     img = image or os.environ.get("AGENT_SANDBOX_IMAGE", "decision-os-agent:noambient-v1")
     agent = Path(agent_script).resolve()
@@ -300,6 +304,10 @@ def locked_agent_docker_cmd(
         "--network=none",
         "--cap-drop=ALL",
         "--pids-limit=64",
+        "--memory=128m",
+        "--memory-swap=128m",
+        "--cpus=0.5",
+        "--ulimit=nofile=64:64",
         "--security-opt=no-new-privileges",
         f"--security-opt=seccomp={sc}",
         "--tmpfs",
@@ -309,9 +317,13 @@ def locked_agent_docker_cmd(
         "-v",
         f"{lock}:/lock_and_run.py:ro",
         img,
+        "timeout",
+        "--signal=KILL",
+        f"{wall_timeout_s}s",
         "python",
         "/lock_and_run.py",
         "/agent.py",
+        *agent_args,
     ]
 
 

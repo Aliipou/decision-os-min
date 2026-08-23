@@ -34,6 +34,7 @@ no effect adapters                  AuthGate / decision kernel
 | Durable FS write + outbound net + ambient creds | **TM-A-v1 FS/NET** | **PASS** | `tests/test_os_isolation.py` |
 | AgentCreatedProcess after `lock_and_run` | **TM-A process** | **PASS** | unlocked exec=`RAN`, fork=`FORKED` |
 | W^X + ptrace after lock | **TM-A non-exec** | **PASS** | unlocked still `MAPPED`/`EXEC_GRANTED`/`ATTACHED` |
+| Fork/thread/FD/memory/CPU exhaustion | **TM-A resources** | **BOUNDED** | seccomp + pids/memory/CPU/nofile/wall controls; `tests/test_resource_exhaustion.py` |
 | Full `DirectEffect(Agent)=∅` | **TM-A full** | **PARTIAL** | breakout / Host / out-of-profile |
 
 See [`THREAT_MODELS.md`](THREAT_MODELS.md), [`SUBPROCESS_BOUNDARY.md`](SUBPROCESS_BOUNDARY.md).

@@ -149,7 +149,18 @@ def test_h5_locked_agent_command_uses_declared_tm_a_boundary(tmp_path):
     assert "--network=none" in cmd
     assert "--cap-drop=ALL" in cmd
     assert "--pids-limit=64" in cmd
+    assert "--memory=128m" in cmd
+    assert "--memory-swap=128m" in cmd
+    assert "--cpus=0.5" in cmd
+    assert "--ulimit=nofile=64:64" in cmd
     assert "--security-opt=no-new-privileges" in cmd
     assert "--security-opt=seccomp=/profiles/noambient.json" in cmd
     assert "agent:test" in cmd
-    assert cmd[-2:] == ["/lock_and_run.py", "/agent.py"]
+    assert cmd[-6:] == [
+        "timeout",
+        "--signal=KILL",
+        "10s",
+        "python",
+        "/lock_and_run.py",
+        "/agent.py",
+    ]

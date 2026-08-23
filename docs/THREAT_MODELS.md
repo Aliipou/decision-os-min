@@ -30,6 +30,7 @@ DirectEffect(Agent) = ∅
 | **TM-A-v1 FS/NET** | Durable FS write + outbound net + ambient product creds | **PASS** |
 | **AgentCreatedProcess** | `execve` + `fork/vfork/clone/clone3` after `lock_and_run` | **PASS** |
 | **Non-exec W^X / ptrace** | `mmap`/`mprotect` PROT_EXEC + `ptrace` after lock | **PASS** |
+| **Resource exhaustion** | fork/thread, memory, CPU, and file descriptors under the canonical runner | **BOUNDED** |
 | **TM-A full** | Zero residual DirectEffect (breakout, Host, logic bombs) | **PARTIAL** |
 
 **Evidence (`tests/test_os_isolation.py`):**
@@ -41,6 +42,11 @@ unlocked: subprocess=RAN, fork=FORKED, mmap_exec=MAPPED,
 ```
 
 **Lifecycle note:** warm-import stdlib `.so` **before** W^X lock; after lock, new executable mappings fail (intentional — blocks late native loads).
+
+**Resource evidence (`tests/test_resource_exhaustion.py`):** fork/thread creation
+is `BLOCKED`; descriptor pressure is `LIMITED`; memory and non-terminating CPU
+probes are `KILLED` by OOM and wall timeout respectively. CPU quota limits share
+but does not terminate work. Wall timeout is not a universal safety proof.
 
 **Allowed claim:**
 
@@ -54,6 +60,7 @@ unlocked: subprocess=RAN, fork=FORKED, mmap_exec=MAPPED,
 - Compromised Host (TM-H/TM-K)
 - Pure-Python abuse of **already-warmed** APIs that are not consequential OS effects
 - Anything outside the declared Docker+lock profile (e.g. raw Windows without Docker)
+- Host-wide/kernel exhaustion, side channels, and nested workloads outside the container cgroup
 
 ---
 

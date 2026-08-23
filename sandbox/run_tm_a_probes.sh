@@ -21,6 +21,10 @@ OUT="$(docker run --rm \
   --network=none \
   --cap-drop=ALL \
   --pids-limit=64 \
+  --memory=128m \
+  --memory-swap=128m \
+  --cpus=0.5 \
+  --ulimit nofile=64:64 \
   --security-opt=no-new-privileges \
   --security-opt="seccomp=$SECCOMP" \
   --tmpfs /tmp:rw,noexec,nosuid,size=8m \
@@ -28,7 +32,7 @@ OUT="$(docker run --rm \
   -v "$PROBE:/probe.py:ro" \
   -v "$LOCK:/lock_and_run.py:ro" \
   "$IMAGE" \
-  python /lock_and_run.py /probe.py)"
+  timeout --signal=KILL 10s python /lock_and_run.py /probe.py)"
 
 echo "$OUT"
 python - "$OUT" <<'PY'

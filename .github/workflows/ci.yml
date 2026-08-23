@@ -45,7 +45,7 @@ jobs:
         env:
           AGENT_SANDBOX_IMAGE: decision-os-agent:noambient-v1
       - name: Pytest TM-A markers
-        run: pytest -q -m tm_a tests/test_os_isolation.py
+        run: pytest -q -m tm_a tests/test_os_isolation.py tests/test_resource_exhaustion.py
         env:
           AUTHGATE_BACKEND: python
           AGENT_SANDBOX_IMAGE: decision-os-agent:noambient-v1

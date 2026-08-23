@@ -22,8 +22,10 @@ runc execve(python)                 # container must boot
   → untrusted agent / probe
 ```
 
-Docker flags: `--read-only --network=none --cap-drop=ALL --pids-limit=64
---security-opt=no-new-privileges`
+Docker/runtime controls: `--read-only --network=none --cap-drop=ALL
+--pids-limit=64 --memory=128m --memory-swap=128m --cpus=0.5
+--ulimit=nofile=64:64 --security-opt=no-new-privileges`, plus an in-container
+`timeout --signal=KILL 10s` wall supervisor.
 plus start seccomp (connect/bind) + image with `libseccomp2`.
 
 Helper: `decision_os_min.host.locked_agent_docker_cmd(agent.py)`.
@@ -34,7 +36,16 @@ Helper: `decision_os_min.host.locked_agent_docker_cmd(agent.py)`.
 docker build -t decision-os-agent:noambient-v1 -f sandbox/Dockerfile.agent sandbox/
 ./sandbox/run_tm_a_probes.sh
 pytest -m tm_a tests/test_os_isolation.py
+pytest -m tm_a tests/test_resource_exhaustion.py
 ```
+
+## Resource-exhaustion evidence
+
+The probes are bounded or container-confined and clean up descriptors/children.
+Post-lock fork and thread loops are **BLOCKED** by seccomp; descriptor pressure is
+**LIMITED** by `RLIMIT_NOFILE`; memory pressure is **KILLED** by cgroup OOM; a CPU
+loop is CPU-quota **LIMITED** while running and **KILLED** by the wall supervisor.
+A timeout proves termination for the tested command, not universal sandbox safety.
 
 ## Residuals (why TM-A full ≠ PASS)
 
@@ -42,5 +53,6 @@ pytest -m tm_a tests/test_os_isolation.py
 - Compromised Host
 - Pure-Python use of APIs warmed before lock that are not consequential OS effects
 - New native `.so` after lock fails by design (warm list is TCB-adjacent)
+- Host/kernel denial-of-service and deployments that omit the canonical controls
 
 See `docs/THREAT_MODELS.md`, `docs/SUBPROCESS_BOUNDARY.md`.
