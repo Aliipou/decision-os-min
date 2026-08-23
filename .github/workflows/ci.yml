@@ -12,8 +12,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "${{ matrix.python-version }}"
       - run: python -m pip install --upgrade pip
@@ -32,8 +32,8 @@ jobs:
     name: TM-A OS isolation (agent-noambient-v1)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
@@ -54,7 +54,7 @@ jobs:
     name: Product site production smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate static bundle
         run: |
           node --check public/app.js
@@ -71,7 +71,7 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
           for route in / /styles.css /app.js; do
-            curl --fail --retry 5 --retry-delay 1 "http://127.0.0.1:4173$route"
+            curl --fail --retry 5 --retry-connrefused --retry-delay 1 "http://127.0.0.1:4173$route"
           done
 
   docker:
@@ -80,7 +80,7 @@ jobs:
       name: production-smoke
       url: https://github.com/${{ github.repository }}/deployments/production-smoke
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build image
         run: docker build -t decision-os-min:ci .
       - name: Smoke-test the container
