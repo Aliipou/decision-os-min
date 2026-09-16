@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .authority_pdp import AuthorityPDP
+from .compose import Evaluator
 from .sealed import AdmissionError, SealedRefused, SealedRuntime
 from .spentstore import InMemorySpentStore, SpentStore, SpentStoreUnavailable
 
@@ -121,6 +122,8 @@ class AgentHost:
     spent_store: SpentStore | None = None
     authority_pdp: AuthorityPDP | None = None
     authority_timeout_s: float | None = 1.0
+    extra_evaluators: tuple[Evaluator, ...] = ()
+    evaluator_timeout_s: float | None = 1.0
     runtime: SealedRuntime = field(init=False)
     evidence: list[HostedEvidence] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -138,6 +141,8 @@ class AgentHost:
             spent_store=store,
             authority_pdp=self.authority_pdp,
             authority_timeout_s=self.authority_timeout_s,
+            extra_evaluators=tuple(self.extra_evaluators),
+            evaluator_timeout_s=self.evaluator_timeout_s,
         )
         self.runtime.seal(owned)
         # After seal, `owned` values are poisoned; live bodies only inside runtime.

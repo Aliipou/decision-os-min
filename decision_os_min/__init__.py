@@ -49,6 +49,12 @@ from .plugins import (
     apply_context,
     risk_advisor,
 )
+from .semantic import (
+    PurposeTableJudge,
+    SemanticJudge,
+    SemanticJudgment,
+    semantic_veto,
+)
 from .spentstore import (
     FileSpentStore,
     InMemorySpentStore,
@@ -106,6 +112,11 @@ __all__ = [
     "meet",
     "legitimacy",
     "LegitimacyPolicy",
+    # semantic veto (untrusted judge, veto-only, fail-closed)
+    "semantic_veto",
+    "SemanticJudge",
+    "SemanticJudgment",
+    "PurposeTableJudge",
     # macaroon-inspired attenuation (AE-4 / AE-5)
     "AttenuationError",
     "AuthorityGraph",
@@ -166,11 +177,13 @@ class DecisionOS:
         audit_path: str,
         authority_pdp: AuthorityPDP | None = None,
         authority_timeout_s: float | None = 1.0,
+        evaluator_timeout_s: float | None = 1.0,
     ) -> None:
         self.kernel = Kernel(
             policy,
             authority_pdp=authority_pdp,
             authority_timeout_s=authority_timeout_s,
+            evaluator_timeout_s=evaluator_timeout_s,
         )
         self.log = HashLog(audit_path)
         # The executor OWNS the audit write now (HB-3): it records exactly one

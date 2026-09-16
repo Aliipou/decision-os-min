@@ -359,6 +359,26 @@ untrusted plugins may advise/adapt/provide a backend but never grant. A selected
 policy semantics but still cannot sign, mint, spend, or bypass the PEP. See
 [`docs/PLUGIN_API.md`](docs/PLUGIN_API.md).
 
+### Semantic veto (optional)
+
+Authority checks who may call a tool; it does not read what the payload means.
+`semantic_veto` lets an untrusted judge (a model, a classifier, a rules table)
+refuse an action whose content does not match its declared purpose. It can only
+DENY, so a wrong or prompt-injected judge costs availability, never authority.
+
+```python
+from decision_os_min import DecisionOS, PurposeTableJudge, semantic_veto
+
+judge = PurposeTableJudge({"send_email": ["support_reply"]})
+dos = DecisionOS(policy, audit_path="audit.jsonl", evaluator_timeout_s=15.0)
+dos.handle(action, tools, evaluators=[semantic_veto(judge)])
+```
+
+On the hosted plane, pass `extra_evaluators=(semantic_veto(judge),)` to
+`AgentHost`. A model-backed judge is in
+[`examples/semantic_llm_judge.py`](examples/semantic_llm_judge.py); the design
+and its non-claims are in [`docs/SEMANTIC_VETO.md`](docs/SEMANTIC_VETO.md).
+
 ## Out of Scope (use the full Decision OS for these)
 
 - Distributed deployment / multi-node consensus
