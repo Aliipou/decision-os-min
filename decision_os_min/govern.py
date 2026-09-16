@@ -64,6 +64,7 @@ class Governor:
         evaluators: list[Callable[[dict[str, Any]], dict[str, Any] | str]] | None = None,
         authority_pdp: AuthorityPDP | None = None,
         authority_timeout_s: float | None = 1.0,
+        evaluator_timeout_s: float | None = 1.0,
     ) -> None:
         from decision_os_min import DecisionOS  # lazy: DecisionOS lives in __init__
 
@@ -72,6 +73,7 @@ class Governor:
             audit_path=audit_path,
             authority_pdp=authority_pdp,
             authority_timeout_s=authority_timeout_s,
+            evaluator_timeout_s=evaluator_timeout_s,
         )
         # Co-equal governance evaluators (e.g. an FDK legitimacy evaluator). Their
         # DENY is authoritative and cannot be overridden by authority — see

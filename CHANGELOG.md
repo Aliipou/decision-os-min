@@ -4,6 +4,25 @@ All notable changes to `decision-os-min` are documented here. Versions follow
 [SemVer](https://semver.org/). This is a `0.x` reference implementation — the API
 may change before `1.0`.
 
+## [Unreleased]
+
+### Added
+- `semantic_veto(judge)`: optional evaluator that lets an untrusted semantic
+  judge refuse an action whose content does not match its declared purpose.
+  Veto-only (returns ALLOW or DENY), fail-closed on errors, timeouts, malformed
+  output, non-JSON payloads and views over `max_view_chars` (no truncation).
+  Judge reasons are flattened to one line, stripped of control and bidi
+  characters, bounded, and recorded in the signed decision and audit log.
+- `SemanticJudge` protocol, `SemanticJudgment`, and the deterministic
+  `PurposeTableJudge` reference judge.
+- `evaluator_timeout_s` on `DecisionOS`, `Governor`, `SealedRuntime` and
+  `AgentHost`, so slower evaluators can be given a realistic budget.
+- `extra_evaluators` on `SealedRuntime` and `AgentHost`. Extra evaluators are
+  wrapped by `evidence_free`, so they cannot replace the M5 legitimacy digest or
+  axiom ids.
+- `examples/semantic_llm_judge.py` (stdlib-only model-backed judge) and
+  `docs/SEMANTIC_VETO.md`.
+
 ## [0.1.0] — 2026-07-03
 
 Initial public release: the distilled **reference core** of the Decision OS.

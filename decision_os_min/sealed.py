@@ -222,6 +222,27 @@ class AdmissionOffice:
         return body["actor"], body["stakeholder"]
 
 
+_LEGITIMACY_EVIDENCE_KEYS = frozenset({"legitimacy_digest", "axiom_ids"})
+
+
+def evidence_free(evaluate: Evaluator) -> Evaluator:
+    """Wrap an extra evaluator so it cannot contribute M5 legitimacy evidence.
+
+    The kernel binds the LAST ``legitimacy_digest`` it sees into the signed
+    decision. An extra evaluator composed after the mandatory legitimacy
+    evaluator could otherwise replace that evidence with its own. Stripping the
+    keys here keeps the binding tied to the legitimacy ruling alone; the extra
+    evaluator's verdict and reason still compose normally."""
+
+    def wrapped(action: dict[str, Any]) -> dict[str, Any] | str:
+        out = evaluate(action)
+        if isinstance(out, dict):
+            return {k: v for k, v in out.items() if k not in _LEGITIMACY_EVIDENCE_KEYS}
+        return out
+
+    return wrapped
+
+
 def tri_state_legitimacy(
     policy: Callable[[dict[str, Any]], tuple[bool | None, str, tuple[str, ...]]],
 ) -> Evaluator:
@@ -288,6 +309,12 @@ class SealedRuntime:
     spent_store: SpentStore
     authority_pdp: AuthorityPDP | None = None
     authority_timeout_s: float | None = 1.0
+    # Optional veto-only evaluators composed AFTER the mandatory legitimacy
+    # evaluator (e.g. semantic_veto). Order carries no authority: the meet is
+    # deny-dominant. They must not emit legitimacy_digest/axiom_ids, or they
+    # would displace the M5 legitimacy evidence.
+    extra_evaluators: tuple[Evaluator, ...] = ()
+    evaluator_timeout_s: float | None = 1.0
     kernel: _KernelFacade = field(init=False)
     log: HashLog = field(init=False)
     executor: _SealedExecutor = field(init=False)
@@ -308,6 +335,7 @@ class SealedRuntime:
             self.policy,
             authority_pdp=self.authority_pdp,
             authority_timeout_s=self.authority_timeout_s,
+            evaluator_timeout_s=self.evaluator_timeout_s,
         )
         self.kernel = _KernelFacade(self._kernel)
         self.log = HashLog(self.audit_path)
@@ -321,6 +349,7 @@ class SealedRuntime:
             spent_store=self.spent_store,
         )
         self._leg_eval = tri_state_legitimacy(self.legitimacy)
+        self._extra_evals = [evidence_free(ev) for ev in self.extra_evaluators]
 
     def register_agent(self, agent_id: str, *, actor: str, stakeholder: str) -> None:
         self._agent_meta[agent_id] = {"actor": actor, "stakeholder": stakeholder}
@@ -425,7 +454,7 @@ class SealedRuntime:
         }
 
         auth_preview = self._kernel.decide(dict(action), evaluators=None)
-        result = self._kernel.decide(action, evaluators=[self._leg_eval])
+        result = self._kernel.decide(action, evaluators=[self._leg_eval, *self._extra_evals])
         decision = result["decision"]
 
         # M5 is mandatory on the sealed surface — no opt-out.
