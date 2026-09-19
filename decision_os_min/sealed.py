@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -149,6 +150,7 @@ class AdmissionTicket:
     expires_at: str
     nonce: str
     signature: str
+    agent_id: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -157,6 +159,7 @@ class AdmissionTicket:
             "expires_at": self.expires_at,
             "nonce": self.nonce,
             "signature": self.signature,
+            "agent_id": self.agent_id,
         }
 
 
@@ -166,6 +169,9 @@ class AdmissionOffice:
     Replay is enforced by the same durable store as decision tokens (prefix
     ``adm:``), so two SealedRuntime replicas sharing a store cannot both consume
     one ticket. Fail-closed if the store is unreachable.
+
+    ``seed_material`` is a **secret**. It must never be the kernel public key
+    or any other published value.
     """
 
     def __init__(
@@ -181,10 +187,11 @@ class AdmissionOffice:
         self._ttl = ttl_seconds
         self._spent = spent_store
 
-    def issue(self, actor: str, stakeholder: str) -> AdmissionTicket:
+    def issue(self, actor: str, stakeholder: str, agent_id: str = "") -> AdmissionTicket:
         body = {
             "actor": actor,
             "stakeholder": stakeholder,
+            "agent_id": agent_id,
             "expires_at": (datetime.now(UTC) + timedelta(seconds=self._ttl)).isoformat(),
             "nonce": uuid.uuid4().hex,
         }
@@ -195,13 +202,17 @@ class AdmissionOffice:
             expires_at=body["expires_at"],
             nonce=body["nonce"],
             signature=sig,
+            agent_id=agent_id,
         )
 
-    def consume(self, ticket: AdmissionTicket | dict[str, str]) -> tuple[str, str]:
-        """Verify + single-spend via SpentStore. Returns (actor, stakeholder)."""
+    def verify(self, ticket: AdmissionTicket | dict[str, str]) -> dict[str, str]:
+        """Check signature and expiry. Does not spend."""
         d = ticket.as_dict() if isinstance(ticket, AdmissionTicket) else dict(ticket)
         sig_hex = d.get("signature", "")
-        body = {k: d[k] for k in ("actor", "stakeholder", "expires_at", "nonce")}
+        body = {
+            k: d.get(k, "")
+            for k in ("actor", "stakeholder", "agent_id", "expires_at", "nonce")
+        }
         try:
             if datetime.now(UTC) >= datetime.fromisoformat(body["expires_at"]):
                 raise AdmissionError("admission ticket expired")
@@ -210,6 +221,20 @@ class AdmissionOffice:
             raise
         except Exception as exc:
             raise AdmissionError(f"admission ticket invalid: {exc}") from exc
+        return body
+
+    def consume(
+        self,
+        ticket: AdmissionTicket | dict[str, str],
+        *,
+        expected_agent_id: str | None = None,
+    ) -> tuple[str, str]:
+        """Verify + single-spend via SpentStore. Returns (actor, stakeholder)."""
+        body = self.verify(ticket)
+        if expected_agent_id is not None and body.get("agent_id", "") != expected_agent_id:
+            raise AdmissionError(
+                f"ticket agent_id {body.get('agent_id')!r} does not match {expected_agent_id!r}"
+            )
         key = f"adm:{body['nonce']}"
         try:
             first = self._spent.try_spend(key)
@@ -290,9 +315,9 @@ class SealedRuntime:
     authority_timeout_s: float | None = 1.0
     kernel: _KernelFacade = field(init=False)
     log: HashLog = field(init=False)
-    executor: _SealedExecutor = field(init=False)
     admission: AdmissionOffice = field(init=False)
     evidence: list[EvidenceRecord] = field(default_factory=list)
+    _executor: _SealedExecutor = field(init=False, repr=False)
     # Public-facing table: always poisoned / inert callables (never live effects).
     _tools: dict[str, Callable[..., Any]] = field(default_factory=dict)
     # Private bodies — only wrapped as a fresh closure inside invoke() for PEP.
@@ -311,23 +336,31 @@ class SealedRuntime:
         )
         self.kernel = _KernelFacade(self._kernel)
         self.log = HashLog(self.audit_path)
-        self.executor = _SealedExecutor(
+        self._executor = _SealedExecutor(
             self._kernel.public_key_hex(),
             self.log,
             spent_store=self.spent_store,
         )
         self.admission = AdmissionOffice(
-            seed_material=self._kernel.public_key_hex(),
+            seed_material=secrets.token_hex(32),
             spent_store=self.spent_store,
         )
         self._leg_eval = tri_state_legitimacy(self.legitimacy)
+
+    @property
+    def executor(self) -> _SealedExecutor:
+        return self._executor
+
+    @executor.setter
+    def executor(self, _value: Any) -> None:
+        raise SealedBreach("sealed executor is pinned; substitution refused")
 
     def register_agent(self, agent_id: str, *, actor: str, stakeholder: str) -> None:
         self._agent_meta[agent_id] = {"actor": actor, "stakeholder": stakeholder}
 
     def admit(self, agent_id: str) -> AdmissionTicket:
         meta = self._agent_meta[agent_id]
-        return self.admission.issue(meta["actor"], meta["stakeholder"])
+        return self.admission.issue(meta["actor"], meta["stakeholder"], agent_id)
 
     def seal(self, tools: dict[str, Callable[..., Any]]) -> dict[str, Callable[..., Any]]:
         if self._frozen:
@@ -391,16 +424,22 @@ class SealedRuntime:
         resource: str = "",
         capability: str | None = None,
     ) -> Any:
-        actor, stakeholder = self.admission.consume(ticket)
-        meta = self._agent_meta.get(agent_id, {})
-        if meta.get("actor") and meta["actor"] != actor:
+        meta = self._agent_meta.get(agent_id)
+        if meta is None:
+            raise AdmissionError(f"unknown agent {agent_id!r}")
+        body = self.admission.verify(ticket)
+        if body.get("agent_id", "") != agent_id:
             raise AdmissionError(
-                f"ticket actor {actor!r} does not match agent {agent_id} ({meta['actor']})"
+                f"ticket agent_id {body.get('agent_id')!r} does not match {agent_id!r}"
             )
-        if meta.get("stakeholder") and meta["stakeholder"] != stakeholder:
+        if meta["actor"] != body["actor"]:
+            raise AdmissionError(
+                f"ticket actor {body['actor']!r} does not match agent {agent_id} ({meta['actor']})"
+            )
+        if meta["stakeholder"] != body["stakeholder"]:
             raise AdmissionError("ticket stakeholder substitution refused")
-
         effect_body = self._assert_registry_integrity(tool)
+        actor, stakeholder = self.admission.consume(ticket, expected_agent_id=agent_id)
         pep_tool = self._pep_closure(effect_body)
         cap = capability or f"tool:{tool}"
         purpose = intent
@@ -424,9 +463,9 @@ class SealedRuntime:
             "resource": resource,
         }
 
-        auth_preview = self._kernel.decide(dict(action), evaluators=None)
         result = self._kernel.decide(action, evaluators=[self._leg_eval])
         decision = result["decision"]
+        authority_verdict = str(decision.get("authority_verdict") or "")
 
         # M5 is mandatory on the sealed surface — no opt-out.
         if decision.get("verdict") in PERMITTING and not decision.get("legitimacy_binding"):
@@ -455,16 +494,16 @@ class SealedRuntime:
             raise SealedRefused(DENY, "decision signature invalid", {})
 
         tools_map = {tool: pep_tool}
-        self.executor.arm(str(decision.get("action_binding") or ""), tools_map)
+        self._executor.arm(str(decision.get("action_binding") or ""), tools_map)
         try:
-            output = self.executor.execute(action, result, tools_map)
+            output = self._executor.execute(action, result, tools_map)
         except ExecutionRefused as exc:
             rec = self._emit(
                 action,
                 agent_id,
                 intent,
                 resource,
-                auth_preview,
+                authority_verdict,
                 decision,
                 result,
                 False,
@@ -482,7 +521,7 @@ class SealedRuntime:
             agent_id,
             intent,
             resource,
-            auth_preview,
+            authority_verdict,
             decision,
             result,
             True,
@@ -497,7 +536,7 @@ class SealedRuntime:
         agent_id: str,
         intent: str,
         resource: str,
-        auth_preview: dict[str, Any],
+        authority_verdict: str,
         decision: dict[str, Any],
         result: dict[str, Any],
         executed: bool,
@@ -519,7 +558,7 @@ class SealedRuntime:
             legitimacy_reason=str(decision.get("reason", "")),
             axiom_ids=list(decision.get("axiom_ids") or []),
             legitimacy_binding=decision.get("legitimacy_binding"),
-            authority_verdict=str(auth_preview["decision"].get("verdict")),
+            authority_verdict=authority_verdict,
             pep_verdict=pep_note,
             executed=executed,
             output=output,

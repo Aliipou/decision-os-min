@@ -77,6 +77,34 @@ def test_external_allow_replaces_builtin_grants_but_kernel_alone_mints(tmp_path)
     assert outcome.executed and outcome.output == "hello"
 
 
+def test_allow_all_pdp_cannot_mint_when_capability_disagrees_with_tool(tmp_path):
+    """Replaceable PDPs must not skip the kernel's action-shape gate.
+
+    Builtin already denied capability≠tool. An ALLOW-all adapter used to mint a
+    token for ``capability`` while Cedar/OPA keyed off ``tool`` — confused deputy.
+    """
+    pdp = FakePDP()
+    dos = DecisionOS({}, audit_path=str(tmp_path / "shape.jsonl"), authority_pdp=pdp)
+    action = _action(tool="send_email", capability="tool:wire_money", nonce="shape")
+    result = dos.kernel.decide(action)
+    decision = result["decision"]
+    assert decision["verdict"] == DENY
+    assert result["token"] is None
+    assert "ambiguous" in decision["reason"]
+    assert decision["authority_provider"] == "kernel"
+
+    ran = []
+    outcome = dos.handle(
+        _action(tool="send_email", capability="tool:wire_money", nonce="shape-exec"),
+        {
+            "send_email": lambda payload: ran.append("email") or payload,
+            "wire_money": lambda payload: ran.append("wire") or payload,
+        },
+    )
+    assert outcome.verdict == DENY and not outcome.executed
+    assert ran == []
+
+
 def test_provider_field_injection_is_stripped_before_kernel_signs():
     injected = {
         "verdict": ALLOW,

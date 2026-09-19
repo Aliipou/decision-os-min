@@ -38,7 +38,7 @@ tool is not governance of autonomous action.
 > An autonomous agent proposes tool calls (send an email, issue a refund,
 > deploy). Something must decide, per action, whether it may run — and if so
 > under what constraints — then **mediate execution** and leave a
-> **non-repudiable record**. The agent, its planner, and the transport are
+> **tamper-evident record**. The agent, its planner, and the transport are
 > all **untrusted**.
 
 That is narrower than "authorization" in general. It has four sub-problems:
@@ -54,13 +54,13 @@ That is narrower than "authorization" in general. It has four sub-problems:
 | Policy decision engines | **OPA/Rego**, **AWS Cedar** (formally analyzable), **OpenFGA/SpiceDB** (Zanzibar ReBAC), Oso, Casbin | the decision (allow/deny), rich policy languages |
 | Capability tokens | **Macaroons** (HMAC caveats, attenuation), **Biscuit** (signed blocks + Datalog, offline verify) | attenuable, delegatable authority carried in a token |
 | Enforcement points | Envoy `ext_authz`, service-mesh authz, API gateways, **MCP tool annotations** (`readOnly`/`destructive`), Anthropic Claude Managed Agents (hosted sandboxing) | stopping/ gating the call; sandboxed execution |
-| Tamper-evident audit | Sigstore **Rekor** / Trillian (Merkle transparency logs) | non-repudiable, append-only records |
+| Tamper-evident audit | Sigstore **Rekor** / Trillian (Merkle transparency logs) | tamper-evident, append-only records |
 | Emerging agent-native research | **Agent Identity Protocol (AIP)** — verifiable delegation; **Agent Control Protocol** — "admission control for agent actions"; Vouchsafe | the whole agent-action-governance problem |
 
-**Nobody ships all four sub-problems as one small coherent thing tuned for
-autonomous tool-execution** — the mature options are each strong at one
-layer. That gap is the only engineering reason Decision OS is interesting;
-it is also why "just assemble the mature pieces" is a serious alternative
+**We have not found** a small library that binds all four sub-problems as one
+coherent unit tuned for autonomous tool-execution — the mature options are each
+strong at one layer. That gap is an engineering opinion, not a market proof.
+It is also why "just assemble the mature pieces" is a serious alternative
 (see below). The civilizational reason — ownership-preserving governance as
 machines act — is [WHY.md](WHY.md). It is not proven by the layer table.
 
@@ -120,7 +120,7 @@ of it with `python -m pytest -v` in `decision-os-min`, or `python examples/demo.
 | Advisory ≠ authority (ML can only tighten) | ✅ | n/a | n/a | n/a | `decide(advisor=)` · `test_advisory_never_loosens_a_deny`, `test_advisor_plugin_can_only_tighten` |
 | **Tamper-evident audit, built in** | ✅ | ❌ (decision logs, not tamper-evident) | ❌ (external SIEM) | ❌ | `audit.py:verify` · `test_audit_tamper_detected` |
 | Mandatory enforcement (PEP bound to token) | ✅ | ❌ (PDP only; you build the PEP) | ~ (gateway) | ❌ (token only) | `execute.py` · `test_deny_blocks`, `examples/demo.py` |
-| Reference↔enterprise behavioral lock | ✅ | n/a | n/a | n/a | `decision-os-integration/tests/test_conformance_min_vs_core.py` |
+| Reference↔enterprise behavioral lock | n/a | n/a | n/a | n/a | not in this package |
 | **Policy-language maturity** | ❌ (tiny engine) | ✅✅ (Cedar is *formally analyzable*) | n/a | n/a | — (we concede this) |
 | **Identity / ecosystem / standardization** | ❌ (minimal) | ~ | ✅✅ (OAuth 2.1 standard) | ~ | — (we concede this) |
 | **Production maturity / scale** | ❌ (prototype, <2 months) | ✅✅ | ✅✅ | ✅ | — (we concede this) |

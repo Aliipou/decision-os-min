@@ -297,6 +297,7 @@ def test_fixed1f_the_signed_decision_carries_no_forged_token(tmp_path):
         "action_binding",
         "authority_provider",
         "authority_policy_revision",
+        "authority_verdict",
     }
     assert d["authority_provider"] == "builtin"
 

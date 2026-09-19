@@ -244,6 +244,14 @@ class Kernel:
     def authority_healthcheck(self) -> tuple[bool, str]:
         return self._authority_pdp.healthcheck()
 
+    def authority_ruling(self, action: dict[str, Any]) -> CanonicalAuthorityResult:
+        """PDP verdict only — no signature, token, or executable decision."""
+        return evaluate_authority(
+            self._authority_pdp,
+            action,
+            timeout_s=self._authority_timeout_s,
+        )
+
     def grant(self, actor: str, capability: str) -> None:
         """Explicit root issuance — the only operation that raises authority."""
         if self._builtin_authority is None:
@@ -290,6 +298,24 @@ class Kernel:
 
         def d(verdict: str, reason: str, **extra: Any) -> dict[str, Any]:
             return {"verdict": verdict, "reason": reason, "action_ref": ref, **extra}
+
+        # Action shape is a kernel invariant, not a PDP policy. Builtin already
+        # denied capability≠tool; a replaceable ALLOW-all PDP must not mint a
+        # token for a different tool than the one named in the action.
+        tool = action.get("tool")
+        cap = action.get("capability")
+        if isinstance(cap, str) and cap and tool and cap != f"tool:{tool}":
+            reason = f"ambiguous: capability '{cap}' != tool '{tool}'"
+            denied = CanonicalAuthorityResult(DENY, reason, "kernel", "action-shape")
+            return (
+                d(
+                    DENY,
+                    reason,
+                    authority_provider=denied.provider,
+                    authority_policy_revision=denied.policy_revision,
+                ),
+                denied,
+            )
 
         authority_result = evaluate_authority(
             self._authority_pdp,
@@ -394,8 +420,11 @@ class Kernel:
         `evaluator_timeout` bounds each evaluator call in seconds (default:
         ``self._evaluator_timeout_s``, typically 1.0). Pass ``None`` for
         unbounded in-process evaluation."""
+        action = copy.deepcopy(action)
         if advisor is not None:
-            threat_class = advisor(action)
+            # Advisors are untrusted: they see a copy, never the action that
+            # will be bound, signed, and executed.
+            threat_class = advisor(copy.deepcopy(action))
         authority_timeout_value: float | None = (
             self._authority_timeout_s
             if authority_timeout is ...
@@ -481,6 +510,7 @@ class Kernel:
         # when a legitimacy evaluator's stricter verdict governs the meet.
         decision["authority_provider"] = authority_result.provider
         decision["authority_policy_revision"] = authority_result.policy_revision
+        decision["authority_verdict"] = authority_result.verdict
         decision["issued_by"] = KERNEL_IDENTITY
         decision["action_binding"] = action_fingerprint(action)
         # M5: cryptographic binding of legitimacy evidence into the signed decision.

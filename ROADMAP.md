@@ -39,6 +39,12 @@ The next milestones are **validation, not more kernel construction**:
    use case or axioms as Cedar, and not a speed ranking).
 3. Fixing what real users find.
 4. Independent review / a technical write-up with evidence.
+5. **Standards track (aspirational):** freeze the mint/execute interop profile,
+   extract a language-agnostic schema, publish a conformance pack other PEPs
+   can run. Becoming a *standard* is multi-impl + a host venue (MCP / AuthZEN /
+   A2A / AGT), not a claim in this README. Becoming *infrastructure* is closing
+   named residuals (TM-A full, multi-host spend, independent signer ops).
+   See [`docs/STANDARD_AND_INFRA.md`](docs/STANDARD_AND_INFRA.md).
 
 The reason to keep the core small is the reason the project exists:
 autonomous systems that act will need ownership-preserving governance.

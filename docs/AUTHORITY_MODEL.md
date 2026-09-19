@@ -42,30 +42,30 @@ return a bounded canonical result. Returned `signature`, `token_id`,
 kernel applies host-owned LIMIT/CONTAIN behavior, composes legitimacy, then
 creates the only signature/token. A PDP call alone cannot reach a tool.
 
-## Security invariants (formal, each with its proof)
+## Security invariants (enforced in this Python reference; evidence is tests, not proofs)
 
 Let `K` = kernel signing key (exists only in the kernel process). Let a *verdict*
 be one of ALLOW/DENY/LIMIT/CONTAIN/DEFER.
 
 - **INV-1 — Single source of executable authority.** An effect runs only if it is
   authorized by a decision signed under `K`. No PDP can manufacture that
-  signature. *Proof:* `test_forged_decision_refused`, `test_tampering_signed_token_id_breaks_signature`.
+  signature. *Evidence:* `test_forged_decision_refused`, `test_tampering_signed_token_id_breaks_signature`.
 - **INV-2 — Mandatory mediation.** No tool executes without a valid decision *and*
-  an unspent capability token. *Proof:* `test_deny_blocks`, and the executor's
+  an unspent capability token. *Evidence:* `test_deny_blocks`, and the executor's
   verify-then-spend path in `execute.py`.
 - **INV-3 — One-time authorization.** Each decision's capability is consumable
-  exactly once; replay is refused. *Proof:* `test_replayed_token_refused`.
+  exactly once; replay is refused. *Evidence:* `test_replayed_token_refused`.
 - **INV-4 — Effect is bound to the decision.** Every side effect is bound, before
   execution, to a signature over the *security-relevant content of that action*; a
-  decision cannot be re-attached to a different action. *Proof:*
+  decision cannot be re-attached to a different action. *Evidence:*
   `test_confused_deputy_refused` (+ `action_fingerprint` in `kernel.py`).
 - **INV-5 — Advice is not authority.** An ordinary advisor may only make a verdict *more*
-  restrictive; it can never author a verdict or loosen a DENY. *Proof:*
+  restrictive; it can never author a verdict or loosen a DENY. *Evidence:*
   `test_advisory_never_loosens_a_deny`, `test_advisor_plugin_can_only_tighten`.
 - **INV-6 — Pipeline order.** Hard-deny gates (capability, purpose) are evaluated
   **before** advisory-driven containment, so an unauthorized action is denied
   outright rather than sandbox-run — advice cannot upgrade a DENY into a CONTAIN.
-  *Proof:* the ordering in `kernel._evaluate` and
+  *Evidence:* the ordering in `kernel._evaluate` and
   `test_advisory_never_loosens_a_deny`.
 
 The Python reference enforces these with runtime checks. Cedar/OPA become part

@@ -3,7 +3,7 @@
 > Reference core: [`decision_os_min/`](../decision_os_min). See also
 > [WHY.md](WHY.md) · [THREAT_MODEL.md](THREAT_MODEL.md) ·
 > [TRUST_MODEL.md](TRUST_MODEL.md) · [DESIGN_PRINCIPLES.md](DESIGN_PRINCIPLES.md) ·
-> [README](../README.md)
+> [README](../README.md) · [COMPOSITION_NOTE.md](COMPOSITION_NOTE.md)
 
 ## Components
 

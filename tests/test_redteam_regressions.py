@@ -89,6 +89,26 @@ def test_hb1_inmemory_is_explicit_optin(tmp_path):
     assert isinstance(InMemorySpentStore(), SpentStore)
 
 
+def test_hb1_distinct_ids_do_not_collide_on_marker_files(tmp_path):
+    """Sanitizing ':' to '_' used to fold distinct spend keys onto one file."""
+    store = FileSpentStore(tmp_path / "spent")
+    assert store.try_spend("ipc:bot:a:b") is True
+    assert store.try_spend("ipc:bot:a_b") is True
+    assert store.try_spend("ipc:bot:a:b") is False
+
+
+def test_hb1_missing_tool_does_not_spend(tmp_path):
+    """A PEP refusal before the effect must not consume the one-time token."""
+    store = FileSpentStore(tmp_path / "spent")
+    k = Kernel(POLICY)
+    action = _action()
+    result = k.decide(action)
+    ex = Executor(k.public_key_hex(), HashLog(tmp_path / "a.jsonl"), spent_store=store)
+    with pytest.raises(ExecutionRefused, match="no executor registered"):
+        ex.execute(action, result, {})
+    assert ex.execute(action, result, {"pay": lambda p: "PAID"}) == "PAID"
+
+
 # --- HB-2: audit tail-truncation now detectable via anchor ------------------
 def test_hb2_tail_truncation_detected_by_anchor(tmp_path):
     """poc3: plain verify() still passes after truncation (internal consistency),

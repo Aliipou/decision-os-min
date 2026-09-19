@@ -7,6 +7,7 @@ Every test tries to produce a side effect. PASS means the effect did NOT run
 from __future__ import annotations
 
 import copy
+import hashlib
 
 import pytest
 
@@ -662,3 +663,165 @@ def test_d15_regulator_constraint_blocks_owner_preference(runtime):
             resource="ranking_model",
         )
     assert effects["deploy_ranking"] == []
+
+
+def test_d5e_admission_cannot_be_forged_from_kernel_pubkey(runtime):
+    """Admission seed is independent of the published kernel public key."""
+    from datetime import UTC, datetime, timedelta
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from decision_os_min.sealed import _canon
+
+    rt, _, _, effects = runtime
+    seed = hashlib.sha256(rt.kernel.public_key_hex().encode()).digest()
+    key = Ed25519PrivateKey.from_private_bytes(seed)
+    body = {
+        "actor": "agent:owner",
+        "stakeholder": "owner",
+        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        "nonce": "stolen-from-pubkey",
+    }
+    fake = AdmissionTicket(
+        actor=body["actor"],
+        stakeholder=body["stakeholder"],
+        expires_at=body["expires_at"],
+        nonce=body["nonce"],
+        signature=key.sign(_canon(body)).hex(),
+    )
+    with pytest.raises(AdmissionError):
+        rt.invoke(
+            ticket=fake,
+            agent_id="owner-1",
+            tool="deploy_ranking",
+            payload={"model": "v1"},
+            intent="deploy",
+            resource="ranking_model",
+        )
+    assert effects["deploy_ranking"] == []
+
+
+def test_d5f_unknown_agent_id_fail_closed_without_spending_ticket(runtime):
+    rt, _, _, effects = runtime
+    t = rt.admit("owner-1")
+    with pytest.raises(AdmissionError, match="unknown agent"):
+        rt.invoke(
+            ticket=t,
+            agent_id="not-registered",
+            tool="deploy_ranking",
+            payload={"model": "v1"},
+            intent="deploy",
+            resource="ranking_model",
+        )
+    assert rt.invoke(
+        ticket=t,
+        agent_id="owner-1",
+        tool="audit_export",
+        payload={"scope": "public"},
+        intent="audit",
+        resource="audit",
+    ) == "audit:public"
+    assert effects["deploy_ranking"] == []
+
+
+def test_d5g_invoke_signs_once_after_legitimacy(runtime):
+    rt, _, _, _ = runtime
+    calls = {"n": 0}
+    real = rt._kernel.decide  # noqa: SLF001
+
+    def counted(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    rt._kernel.decide = counted  # noqa: SLF001
+    t = rt.admit("owner-1")
+    assert (
+        rt.invoke(
+            ticket=t,
+            agent_id="owner-1",
+            tool="audit_export",
+            payload={"scope": "public"},
+            intent="audit",
+            resource="audit",
+        )
+        == "audit:public"
+    )
+    assert calls["n"] == 1
+
+
+def test_d5h_executor_substitution_is_refused(runtime):
+    rt, _, _, effects = runtime
+
+    class Bypass:
+        def arm(self, *_a, **_k):
+            return None
+
+        def execute(self, action, _result, tools):
+            return tools[action["tool"]](action.get("payload") or {})
+
+    with pytest.raises(SealedBreach, match="pinned"):
+        rt.executor = Bypass()  # type: ignore[misc]
+    t = rt.admit("owner-1")
+    with pytest.raises(SealedRefused):
+        rt.invoke(
+            ticket=t,
+            agent_id="owner-1",
+            tool="deploy_ranking",
+            payload={"model": "v1", "dark_pattern": True},
+            intent="deploy",
+            resource="ranking_model",
+        )
+    assert effects["deploy_ranking"] == []
+
+
+def test_d5i_unknown_tool_does_not_spend_the_ticket(runtime):
+    rt, _, _, effects = runtime
+    t = rt.admit("owner-1")
+    with pytest.raises(SealedBreach, match="not in sealed registry"):
+        rt.invoke(
+            ticket=t,
+            agent_id="owner-1",
+            tool="no_such_tool",
+            payload={"model": "v1"},
+            intent="deploy",
+            resource="ranking_model",
+        )
+    assert (
+        rt.invoke(
+            ticket=t,
+            agent_id="owner-1",
+            tool="audit_export",
+            payload={"scope": "public"},
+            intent="audit",
+            resource="audit",
+        )
+        == "audit:public"
+    )
+    assert effects["deploy_ranking"] == []
+
+
+def test_d5j_ticket_is_bound_to_agent_id(runtime):
+    rt, _, _, effects = runtime
+    t = rt.admit("owner-1")
+    with pytest.raises(AdmissionError, match="agent_id"):
+        rt.invoke(
+            ticket=t,
+            agent_id="ops-1",
+            tool="deploy_ranking",
+            payload={"model": "v1"},
+            intent="deploy",
+            resource="ranking_model",
+        )
+    assert (
+        rt.invoke(
+            ticket=t,
+            agent_id="owner-1",
+            tool="audit_export",
+            payload={"scope": "public"},
+            intent="audit",
+            resource="audit",
+        )
+        == "audit:public"
+    )
+    assert effects["deploy_ranking"] == []
+

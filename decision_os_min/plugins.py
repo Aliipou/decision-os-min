@@ -19,6 +19,7 @@ Plugins never execute tools (that is the PEP) and never see the signing key.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -80,12 +81,12 @@ def apply_context(action: dict[str, Any], *plugins: ContextPlugin) -> dict[str, 
     """Return a copy of `action` enriched by context plugins. Additive only:
     unions data_labels and adds metadata; NEVER touches actor/capability/tool/
     action_purpose — so context cannot spoof identity or widen authority."""
-    enriched = dict(action)
+    enriched = copy.deepcopy(action)
     labels = set(enriched.get("data_labels") or [])
     meta = dict(enriched.get("context") or {})
     for p in plugins:
         try:
-            e = p.enrich(action)
+            e = p.enrich(copy.deepcopy(action))
         except Exception:
             continue
         labels |= set(e.data_labels)           # union: only ever ADD labels

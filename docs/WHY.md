@@ -61,8 +61,9 @@ Concretely:
 - **Mandatory mediation.** A tool runs only via
   [`Executor.execute`](../decision_os_min/execute.py), and only against a
   decision that carries the kernel's Ed25519 signature. No signed decision ⇒ no
-  execution (`ExecutionRefused`). The agent cannot route around the checkpoint,
-  because the tool functions are handed to the executor, not to the agent.
+  execution (`ExecutionRefused`). A wrapped tool cannot route around the checkpoint,
+  because the tool functions are handed to the executor, not to the agent. Ambient
+  `open`/`socket` remain if the caller never entered `seal()`.
 
 - **Least privilege via one-time capabilities.** A permitting decision mints a
   single [capability token](../decision_os_min/contracts.py) that is bound to
@@ -71,7 +72,7 @@ Concretely:
   [`Executor.execute`](../decision_os_min/execute.py)). It is not a standing
   credential; it authorizes exactly one effect, once.
 
-- **Non-repudiable audit.** Every decision is appended to a single
+- **Tamper-evident audit.** Every decision is appended to a single
   hash-chained log ([`HashLog`](../decision_os_min/audit.py)) *before* the side
   effect runs. Any retroactive edit, insert, delete, or reorder is detectable by
   `HashLog.verify()`.
@@ -106,3 +107,8 @@ safety proof. For an honest account of what it does and does not defend
 against, read [THREAT_MODEL.md](THREAT_MODEL.md). For why a Cedar comparison
 is still published, and what it is allowed to prove, read
 [COMPARISON.md](COMPARISON.md).
+
+If this gate should become a **standard** (multi-impl interop) or
+**infrastructure** (closed residuals), the candidate profile and the path
+are in [STANDARD_AND_INFRA.md](STANDARD_AND_INFRA.md). That document does
+not claim either destination has been reached.

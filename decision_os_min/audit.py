@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -99,6 +100,8 @@ class HashLog:
         entry["entry_hash"] = _hash(entry)
         with self._path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         self._seq += 1
         self._last = entry["entry_hash"]
         # Publish the new head to the external anchor last, so the durable log is

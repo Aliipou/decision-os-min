@@ -6,8 +6,8 @@ the named threat model.
 
 | Layer | Forbidden action | Enforcement | Evidence |
 |---|---|---|---|
-| Admission | Unknown agent obtains a valid admission; ticket is reused | signed, expiring admission; atomic spend | `test_bypass_invariants.py`, `test_destructor_sealed.py` |
-| Evaluator / context | Plugin grants authority, rewrites identity/tool/payload, or loosens DENY | deny-dominant canonical verdict meet; contributable-field allowlist; frozen action copy | `test_redteam_composition.py`, `test_redteam_round2.py` |
+| Admission | Unknown agent obtains a valid admission; ticket is reused; ticket is forged from the kernel public key | secret admission key; registered-agent fail-closed; atomic spend | `test_destructor_sealed.py` |
+| Evaluator / context | Plugin grants authority, rewrites identity/tool/payload, or loosens DENY | deny-dominant canonical verdict meet; contributable-field allowlist; frozen action copy; advisor sees a deep copy | `test_redteam_composition.py`, `test_redteam_round2.py`, `test_core.py` |
 | Trusted Authority PDP | Adapter signs/mints/spends, injects execution fields, mutates the action, or overrides legitimacy | deep-copied input; strict bounded canonical result; host-owned obligations; deny-dominant meet | `test_authority_pdp.py` |
 | Kernel | Any PDP output becomes executable without canonicalization/composition; decision is rebound to another action | sole signing/minting path; canonical action binding; legitimacy veto before mint | `test_authority_pdp.py`, `test_authority_convergence.py` |
 | PEP / executor | Effect runs without valid signature, matching action, unspent token, or durable audit | signature/action verification; atomic `SpentStore`; audit-before-effect; arm-gated executor | `test_bypass_invariants.py`, `test_destructor_sealed.py`, `test_full_loop.py` |

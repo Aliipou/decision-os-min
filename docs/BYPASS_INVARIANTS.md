@@ -30,9 +30,9 @@ mandatory interceptor), not more library axioms.
 | Export / `__wrapped__` | PASS |
 | Registry mutation (`_tools` / `_bodies`) | PASS |
 | Actor spoofing (`set_actor`) | PASS (tickets required) |
-| Ticket forgery / replay / substitution | PASS |
+| Ticket forgery / replay / substitution | PASS — secret admission seed (not the kernel public key); `test_d5e` |
 | Admission spend across shared store | PASS |
-| Capability substitution | PASS |
+| Capability substitution | PASS — kernel denies `capability` ≠ `tool:<tool>` before any PDP (`test_allow_all_pdp_cannot_mint_when_capability_disagrees_with_tool`) |
 | Decision token replay | PASS |
 | Confused deputy | PASS |
 | Stale FDK / strip binding | PASS |

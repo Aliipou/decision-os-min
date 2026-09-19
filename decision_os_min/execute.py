@@ -9,6 +9,7 @@ without an audit record: the constructor has no audit-less form.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from .compose import CONTAIN, LIMIT, PERMITTING
-from .kernel import action_fingerprint, verify
+from .kernel import _canonical, action_fingerprint, verify
 from .spentstore import FileSpentStore, SpentStore, SpentStoreUnavailable
 
 
@@ -114,7 +115,7 @@ class Executor:
         reason_for_audit = decision.get("reason", "") if isinstance(decision, dict) else ""
 
         try:
-            output = self._execute_inner(action, result, tools)
+            fn, payload = self._prepare(action, result, tools)
         except ExecutionRefused as e:
             # HB-3 + W-3: one audit entry even on refusal — executed=False, with
             # the reason the effect did not run.
@@ -134,32 +135,45 @@ class Executor:
                 payload_digest=None,
             )
             raise
-        # W-3: record the executed outcome AND a digest of the executed payload,
-        # so allow-and-ran is distinguishable from allow-but-refused, and the
-        # amount/target of the effect is committed to the log.
+        # Gate 3 before Gate 2's effect: durable audit of the committed payload
+        # happens BEFORE fn() so a crash cannot produce an unaudited side effect.
+        # executed=True here means the PEP committed to this payload (W-3 digest
+        # is known); if fn() then raises, the log still shows the attempt.
+        digest = _payload_digest(payload)
         self._audit.record(
             actor,
             tool_for_audit,
             verdict_for_audit,
             reason_for_audit,
             executed=True,
-            payload_digest=self._last_payload_digest,
+            payload_digest=digest,
         )
-        return output
+        return fn(payload)
 
-    def _execute_inner(
+    def _prepare(
         self,
         action: dict[str, Any],
         result: dict[str, Any],
         tools: dict[str, Callable[[dict[str, Any]], Any]],
-    ) -> Any:
-        self._last_payload_digest: str | None = None
+    ) -> tuple[Callable[[dict[str, Any]], Any], dict[str, Any]]:
+        # Snapshot the caller's dict so later mutation cannot change the bound
+        # payload the tool receives.
+        action = copy.deepcopy(action)
         decision = result["decision"]
 
         # ONE verification authenticates BOTH the ruling and the folded-in token
         # (token_id / capability / expiry live inside the signed decision now).
         if not verify(decision, result.get("signature", ""), self._pub):
             raise ExecutionRefused("decision not authenticated by the kernel")
+        # Freeze to JSON primitives that actually verified. A live object whose
+        # default=str form matches the signature must not change spend/dispatch.
+        try:
+            frozen = json.loads(_canonical(decision).decode("utf-8"))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ExecutionRefused("decision is not JSON-round-trippable") from exc
+        if not isinstance(frozen, dict):
+            raise ExecutionRefused("decision is not JSON-round-trippable")
+        decision = frozen
 
         # Mandatory mediation: the action handed to us must be the one authorized.
         if decision.get("action_binding") != action_fingerprint(action):
@@ -191,19 +205,9 @@ class Executor:
         try:
             if datetime.now(UTC) >= datetime.fromisoformat(decision["token_expires_at"]):
                 raise ExecutionRefused("token expired")
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, TypeError):
             raise ExecutionRefused("token missing/invalid expiry") from None
-        tid = decision["token_id"]
-        # HB-1: atomic, durable, cross-instance spend. Fail CLOSED if the store is
-        # unreachable — never fall back to "assume unspent".
-        try:
-            first_spender = self._spent.try_spend(tid)
-        except SpentStoreUnavailable as e:
-            raise ExecutionRefused(f"spent-store unavailable, refusing (fail-closed): {e}") from e
-        if not first_spender:
-            raise ExecutionRefused("token already spent (replay)")
-
-        tool_name = decision["capability"].split("tool:")[-1]
+        tool_name = str(decision["capability"]).split("tool:")[-1]
         if verdict == CONTAIN:
             allowed = (decision.get("containment") or {}).get("allowed_tools", [])
             if tool_name not in allowed:
@@ -230,5 +234,21 @@ class Executor:
             else action.get("payload")
         )
         payload = payload or {}
-        self._last_payload_digest = _payload_digest(payload)
-        return fn(payload)
+        if not isinstance(payload, dict):
+            raise ExecutionRefused("payload is not an object")
+
+        tid = decision["token_id"]
+        if not isinstance(tid, str) or not tid:
+            raise ExecutionRefused("token_id missing/invalid")
+        # Spend only after every pre-effect gate. A missing tool / undischargeable
+        # LIMIT used to burn the token without running anything, so a later
+        # correctly-registered executor could not complete the authorized effect.
+        # HB-1: atomic, durable, cross-instance spend. Fail CLOSED if the store is
+        # unreachable — never fall back to "assume unspent".
+        try:
+            first_spender = self._spent.try_spend(tid)
+        except SpentStoreUnavailable as e:
+            raise ExecutionRefused(f"spent-store unavailable, refusing (fail-closed): {e}") from e
+        if not first_spender:
+            raise ExecutionRefused("token already spent (replay)")
+        return fn, payload

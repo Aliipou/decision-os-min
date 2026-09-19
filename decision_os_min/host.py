@@ -30,7 +30,7 @@ from typing import Any
 
 from .authority_pdp import AuthorityPDP
 from .sealed import AdmissionError, SealedRefused, SealedRuntime
-from .spentstore import InMemorySpentStore, SpentStore, SpentStoreUnavailable
+from .spentstore import FileSpentStore, SpentStore, SpentStoreUnavailable
 
 PROTOCOL = 1
 MAX_IPC_FRAME_BYTES = 64 * 1024
@@ -127,7 +127,9 @@ class AgentHost:
     _spent_store: SpentStore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        store = self.spent_store or InMemorySpentStore()
+        store = self.spent_store
+        if store is None:
+            store = FileSpentStore(Path(self.audit_path).resolve().parent / "spent")
         self._spent_store = store
         # Copy adapters into a private registry; agent never sees these callables.
         owned = {name: fn for name, fn in self.adapters.items()}
@@ -158,30 +160,30 @@ class AgentHost:
                 )
                 self.evidence.append(ev)
                 return ev
-            if intent.request_id:
-                replay_key = f"ipc:{self.bound_agent_id or intent.agent_id}:{intent.request_id}"
-                try:
-                    first_request = self._spent_store.try_spend(replay_key)
-                except SpentStoreUnavailable:
-                    ev = HostedEvidence(
-                        request_id=intent.request_id,
-                        agent_id=intent.agent_id,
-                        tool=intent.tool,
-                        ok=False,
-                        error="request_store_unavailable",
-                    )
-                    self.evidence.append(ev)
-                    return ev
-                if not first_request:
-                    ev = HostedEvidence(
-                        request_id=intent.request_id,
-                        agent_id=intent.agent_id,
-                        tool=intent.tool,
-                        ok=False,
-                        error="request_replay",
-                    )
-                    self.evidence.append(ev)
-                    return ev
+            request_id = intent.request_id or uuid.uuid4().hex
+            replay_key = f"ipc:{self.bound_agent_id or intent.agent_id}:{request_id}"
+            try:
+                first_request = self._spent_store.try_spend(replay_key)
+            except SpentStoreUnavailable:
+                ev = HostedEvidence(
+                    request_id=request_id,
+                    agent_id=intent.agent_id,
+                    tool=intent.tool,
+                    ok=False,
+                    error="request_store_unavailable",
+                )
+                self.evidence.append(ev)
+                return ev
+            if not first_request:
+                ev = HostedEvidence(
+                    request_id=request_id,
+                    agent_id=intent.agent_id,
+                    tool=intent.tool,
+                    ok=False,
+                    error="request_replay",
+                )
+                self.evidence.append(ev)
+                return ev
             ticket = self.runtime.admit(intent.agent_id)
             try:
                 out = self.runtime.invoke(
@@ -193,7 +195,7 @@ class AgentHost:
                     resource=intent.resource,
                 )
                 ev = HostedEvidence(
-                    request_id=intent.request_id,
+                    request_id=request_id,
                     agent_id=intent.agent_id,
                     tool=intent.tool,
                     ok=True,
@@ -207,7 +209,7 @@ class AgentHost:
                 if self.runtime.evidence:
                     sealed = self.runtime.evidence[-1].as_dict()
                 ev = HostedEvidence(
-                    request_id=intent.request_id,
+                    request_id=request_id,
                     agent_id=intent.agent_id,
                     tool=intent.tool,
                     ok=False,
@@ -218,6 +220,15 @@ class AgentHost:
             return ev
 
     def handle_wire(self, msg: dict[str, Any]) -> dict[str, Any]:
+        if self.bound_agent_id is None:
+            return {
+                "v": PROTOCOL,
+                "type": "result",
+                "request_id": msg.get("request_id", "") if isinstance(msg, dict) else "",
+                "ok": False,
+                "output": None,
+                "error": "channel_unbound",
+            }
         intent = Intent.from_wire(msg)
         ev = self.handle_intent(intent)
         return {

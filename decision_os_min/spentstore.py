@@ -42,6 +42,7 @@ volume deployments, which is the common case.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import threading
@@ -87,9 +88,11 @@ class FileSpentStore:
 
     @staticmethod
     def _safe_name(token_id: str) -> str:
-        # token_ids are kernel-minted (``tok-<hex>``); still, never trust an input
-        # as a path component. Keep only path-safe chars; fold everything else.
-        return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in token_id) or "_empty"
+        # Hash the logical key. Sanitizing in place collapsed distinct ids
+        # (``ipc:bot:a:b`` vs ``ipc:bot:a_b``) onto one marker file, so the
+        # second was a false replay. SHA-256 hex is path-safe and injective
+        # for practical token_id sizes.
+        return hashlib.sha256(token_id.encode("utf-8")).hexdigest()
 
     def try_spend(self, token_id: str) -> bool:
         path = self._dir / self._safe_name(token_id)

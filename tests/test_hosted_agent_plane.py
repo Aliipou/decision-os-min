@@ -258,3 +258,77 @@ def test_h8_client_timeout_kills_unresponsive_host(tmp_path):
         assert client.proc.poll() is not None
     finally:
         client.close()
+
+
+def test_h8_unbound_ipc_is_fail_closed(tmp_path):
+    host = AgentHost(
+        policy=POLICY,
+        legitimacy=_legit,
+        adapters={"deploy_ranking": lambda *, model, **_k: f"deployed:{model}"},
+        audit_path=str(tmp_path / "unbound.jsonl"),
+    )
+    host.register_agent("bot-1", actor="agent:bot", stakeholder="ops")
+    frame = Intent(
+        "bot-1",
+        "deploy_ranking",
+        {"model": "v1"},
+        "deploy",
+        "ranking",
+        "req-unbound",
+    ).to_wire()
+    result = json.loads(host.handle_ipc_line(json.dumps(frame)))
+    assert result["ok"] is False and result["error"] == "channel_unbound"
+
+
+def test_h9_default_file_spent_store_replays_across_host_objects(tmp_path):
+    """AgentHost defaults to a durable store beside the audit file, so a second
+    host object on the same volume cannot replay an IPC request_id."""
+    effects: list[str] = []
+    audit = str(tmp_path / "cross.jsonl")
+
+    def deploy_ranking(*, model: str, **kw):
+        effects.append(model)
+        return f"deployed:{model}"
+
+    h1 = AgentHost(
+        policy=POLICY,
+        legitimacy=_legit,
+        adapters={"deploy_ranking": deploy_ranking},
+        audit_path=audit,
+        bound_agent_id="bot-1",
+    )
+    h1.register_agent("bot-1", actor="agent:bot", stakeholder="ops")
+    first = h1.handle_intent(
+        Intent(
+            "bot-1",
+            "deploy_ranking",
+            {"model": "v1"},
+            "deploy",
+            "ranking",
+            "req-cross-host",
+        )
+    )
+    assert first.ok is True and effects == ["v1"]
+
+    h2 = AgentHost(
+        policy=POLICY,
+        legitimacy=_legit,
+        adapters={"deploy_ranking": lambda *, model, **_k: effects.append("replay")},
+        audit_path=audit,
+        bound_agent_id="bot-1",
+    )
+    h2.register_agent("bot-1", actor="agent:bot", stakeholder="ops")
+    replay = h2.handle_intent(
+        Intent(
+            "bot-1",
+            "deploy_ranking",
+            {"model": "v1"},
+            "deploy",
+            "ranking",
+            "req-cross-host",
+        )
+    )
+    assert replay.ok is False
+    assert replay.error == "request_replay"
+    assert effects == ["v1"]
+
