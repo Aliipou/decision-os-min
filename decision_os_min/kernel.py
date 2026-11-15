@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -178,11 +179,18 @@ def load_or_create_signing_key(path: str | None) -> Ed25519PrivateKey:
     key = Ed25519PrivateKey.generate()
     p.parent.mkdir(parents=True, exist_ok=True)
     pem = key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
-    p.write_bytes(pem)
+    # Create with O_EXCL and mode 0600 in one step: no window where the key is
+    # world-readable, and two processes starting together cannot both write a
+    # different key (the loser loads the winner's file instead).
     try:
-        p.chmod(0o600)
-    except OSError:
-        pass
+        fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return load_or_create_signing_key(path)
+    try:
+        os.write(fd, pem)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     return key
 
 

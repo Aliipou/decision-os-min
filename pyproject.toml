@@ -11,6 +11,23 @@ requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Ali Pourrahim" }]
 dependencies = ["cryptography>=42"]
+keywords = ["agents", "authorization", "policy-enforcement", "audit", "capability-tokens", "ai-safety"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/Aliipou/decision-os-min"
+Issues = "https://github.com/Aliipou/decision-os-min/issues"
+Changelog = "https://github.com/Aliipou/decision-os-min/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "httpx>=0.27", "hypothesis>=6.100"]
@@ -23,6 +40,9 @@ decision-os-serve = "decision_os_min.service:main"
 
 [tool.setuptools]
 packages = ["decision_os_min"]
+
+[tool.setuptools.package-data]
+decision_os_min = ["py.typed"]
 
 [tool.ruff]
 line-length = 100
