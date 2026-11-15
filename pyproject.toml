@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "The distilled reference core of the Decision OS: single-authority signed decisions, action-binding, one-time capability tokens, a PEP, and one tamper-evident audit log — in one small package. Stdlib + cryptography only."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "PolyForm-Noncommercial-1.0.0" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Ali Pourrahim" }]
 dependencies = ["cryptography>=42"]
 keywords = ["agents", "authorization", "policy-enforcement", "audit", "capability-tokens", "ai-safety"]
