@@ -6,6 +6,10 @@ may change before `1.0`.
 
 ## Unreleased
 
+- `DecisionOS` accepts `key_path` and `spent_store`; signing-key creation is race-safe (`O_EXCL`, mode 0600).
+- Cross-process double-spend tests for `FileSpentStore` and `SqliteSpentStore`; restart and replay tests.
+- `bench/latency.py` (p50/p95/p99); package metadata and `py.typed`; README rewritten; SECURITY.md operational model.
+
 - License changed from PolyForm Noncommercial 1.0.0 to **Apache-2.0**. Earlier releases keep their original license.
 
 ## [0.1.0] — 2026-07-03
