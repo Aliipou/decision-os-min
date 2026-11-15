@@ -254,6 +254,23 @@ fork/exec/thread, executable-mapping, and ptrace attempts and assert kernel
 refusal; they do not infer enforcement from configuration files alone. See
 `tests/test_os_isolation.py`.
 
+## Production wiring (identity, replay, packaging)
+
+```python
+from decision_os_min import DecisionOS, FileSpentStore
+
+dos = DecisionOS(
+    policy,
+    audit_path="/var/lib/dos/audit.jsonl",
+    key_path="/var/lib/dos/kernel.pem",             # signing identity survives restarts
+    spent_store=FileSpentStore("/var/lib/dos/spent"),  # one-time tokens survive restarts and replicas
+)
+```
+
+- Install: `pip install decision-os-min` (core), `pip install "decision-os-min[service]"` for the HTTP starter.
+- Without `key_path` the key is ephemeral; without `spent_store` the default is documented in `decision_os_min/spentstore.py`.
+- Operational controls and limits: see `SECURITY.md`. Latency numbers: `BENCHMARKS.md`.
+
 ## Run it as a service (deployable starter)
 
 A REST service (OpenAPI + health + Prometheus metrics) ships as an **optional**

@@ -94,6 +94,23 @@ PYTHONIOENCODING=utf-8 python bench\benchmark.py
 Benchmark source: `bench/benchmark.py`. Absolute-value noise of a few percent
 between runs is expected on a loaded laptop; re-run a couple of times.
 
+## Latency distribution and concurrency
+
+`bench/latency.py` measures wall-clock per `DecisionOS.handle` (decide + durable
+spend record + audit append + effect) with `FileSpentStore`, single-threaded and
+with 8 threads. Run: `PYTHONPATH=. python bench/latency.py`.
+
+Sample run (Windows 10 laptop, Python 3.13, 500 calls, spinning-disk-class fsync):
+
+| mode | p50 | p95 | p99 |
+|---|---|---|---|
+| 1 thread | 19.2 ms | 32.0 ms | 37.4 ms |
+| 8 threads | 49.4 ms | 94.8 ms | 104.6 ms |
+
+Latency is dominated by the two `fsync`s (spent marker + audit entry), which is
+the price of durability; the 8-thread row shows serialization on those, not CPU.
+These are one machine's numbers, not a capacity claim. Re-run on target hardware.
+
 ## Caveats — read before quoting these numbers
 
 - **Micro-benchmarks, not throughput-at-scale.** Each number is the cost of

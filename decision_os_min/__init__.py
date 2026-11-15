@@ -166,16 +166,21 @@ class DecisionOS:
         audit_path: str,
         authority_pdp: AuthorityPDP | None = None,
         authority_timeout_s: float | None = 1.0,
+        key_path: str | None = None,
+        spent_store: SpentStore | None = None,
     ) -> None:
+        # key_path: persist the signing identity across restarts.
+        # spent_store: durable one-time-token store shared by every replica.
         self.kernel = Kernel(
             policy,
+            key_path=key_path,
             authority_pdp=authority_pdp,
             authority_timeout_s=authority_timeout_s,
         )
         self.log = HashLog(audit_path)
         # The executor OWNS the audit write now (HB-3): it records exactly one
         # entry per execute() — executed or refused — so no effect runs unlogged.
-        self.executor = Executor(self.kernel.public_key_hex(), self.log)
+        self.executor = Executor(self.kernel.public_key_hex(), self.log, spent_store=spent_store)
 
     def grant(self, actor: str, capability: str) -> None:
         self.kernel.grant(actor, capability)
