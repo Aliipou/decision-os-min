@@ -4,6 +4,10 @@ All notable changes to `decision-os-min` are documented here. Versions follow
 [SemVer](https://semver.org/). This is a `0.x` reference implementation — the API
 may change before `1.0`.
 
+## Unreleased
+
+- License changed from PolyForm Noncommercial 1.0.0 to **Apache-2.0**. Earlier releases keep their original license.
+
 ## [0.1.0] — 2026-07-03
 
 Initial public release: the distilled **reference core** of the Decision OS.

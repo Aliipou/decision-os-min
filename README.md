@@ -431,3 +431,7 @@ They are future parity/hardening targets, not evidence that this package
 currently executes a Rust kernel. Any eventual binding must pass differential
 decision, action-binding, minting, and PEP contract tests before changing that
 claim.
+
+## License
+
+Apache-2.0 (see `LICENSE`, `NOTICE`). Versions published before this change were released under the PolyForm Noncommercial License 1.0.0 and remain under that license. Contributions are accepted under the Developer Certificate of Origin.
