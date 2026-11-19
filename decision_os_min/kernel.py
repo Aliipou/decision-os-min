@@ -206,9 +206,22 @@ class Kernel:
         evaluator_timeout_s: float | None = 1.0,
         authority_pdp: AuthorityPDP | None = None,
         authority_timeout_s: float | None = 1.0,
+        isolate_key: bool = True,
     ) -> None:
-        self._key = _key or load_or_create_signing_key(key_path)
-        self._pub = self._key.public_key().public_bytes_raw().hex()
+        # T11: when key_path is set (and no explicit key given) signing runs in a
+        # separate process and this process never holds the private key. Pass
+        # isolate_key=False to keep the legacy in-process key.
+        self._signer = None
+        self._key: Ed25519PrivateKey | None
+        if _key is None and key_path and isolate_key:
+            from .signer import SignerProcess
+
+            self._signer = SignerProcess(key_path)
+            self._key = None
+            self._pub = self._signer.public_key_hex
+        else:
+            self._key = _key or load_or_create_signing_key(key_path)
+            self._pub = self._key.public_key().public_bytes_raw().hex()
         self._grants: dict[str, list[str]] = policy.get("grants", {})
         self._bindings: dict[str, list[str]] = policy.get("purpose_bindings", {})
         self._redactions: list[dict[str, Any]] = policy.get("redactions", [])
@@ -235,7 +248,8 @@ class Kernel:
         self._authority_timeout_s = authority_timeout_s
 
     def public_key_pem(self) -> str:
-        return self._key.public_key().public_bytes(
+        pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(self._pub))
+        return pub.public_bytes(
             Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
         ).decode("ascii")
 
@@ -293,6 +307,9 @@ class Kernel:
         )
 
     def _sign(self, obj: dict[str, Any]) -> str:
+        if self._signer is not None:
+            return self._signer.sign(_canonical(obj)).hex()
+        assert self._key is not None
         return self._key.sign(_canonical(obj)).hex()
 
     def _evaluate(

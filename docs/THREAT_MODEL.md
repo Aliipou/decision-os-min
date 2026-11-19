@@ -136,8 +136,22 @@ It cannot turn a DENY into anything permissive and cannot mint tokens.
 
 Stated plainly — these are *not* defended by this core:
 
-- **Kernel process compromise.** The signing key lives in the kernel process
-  (`Kernel._key`). Code execution inside that process reads the key and can sign
+- **In-process evaluators and the signing key (T11).** Originally an in-process
+  evaluator could read `Kernel._key` by walking the stack; running evaluators on
+  a thread only blocked that, and `gc.get_objects()` still reached the key
+  (`test_break_legacy_*`). When `key_path` is set the key is now held only by a
+  separate signer process (`decision_os_min/signer.py`); the evaluator's address
+  space never contains it, so both the stack-walk and gc paths fail
+  (`test_fixed_*`). This is **not** full plugin isolation. Still open: (a) an
+  in-process evaluator can call the signer through the kernel's pipe, i.e. it is
+  a signing oracle for arbitrary bytes; (b) same-OS-user code can read the PEM at
+  `key_path`; (c) with no `key_path`, or `isolate_key=False`, the key is
+  in-process as before; (d) evaluators can still do anything else the Python
+  process can. Real isolation of untrusted evaluators needs out-of-process
+  evaluators plus an OS user/sandbox boundary. Cost: about +90 us per signature
+  and one extra process (see `bench/signer_overhead.py`).
+- **Kernel process compromise.** The signing key lives in the signer process (or,
+  in the legacy configuration, `Kernel._key`). Code execution inside that process reads the key and can sign
   anything. The whole model rests on the kernel process being trustworthy; there
   is no HSM, key isolation, or attestation here.
 - **Transport / key isolation.** The HTTP starter can persist an Ed25519 key to
