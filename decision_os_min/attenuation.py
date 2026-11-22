@@ -128,6 +128,10 @@ class AuthorityGraph:
         self._macaroons: dict[str, list[Macaroon]] = {}
         # flat root grants: holder -> set of "tool:<name>" (or "*")
         self._root_grants: dict[str, set[str]] = {}
+        # delegation lineage: macaroon identifier -> (minting parent, tools granted). Used so that revoking
+        # a delegator also kills what it passed on (D2: revoke() used to edit root grants only).
+        self._lineage: dict[str, tuple[str, frozenset[str]]] = {}
+        self._revoked_ids: set[str] = set()
 
     # --- root grants (explicit issuance = grant()) --------------------------
     def grant(self, holder: str, capability: str) -> None:
@@ -137,6 +141,23 @@ class AuthorityGraph:
         caps = self._root_grants.get(holder)
         if caps is not None:
             caps.discard(capability)
+        self._cascade_revocations()
+
+    def _cascade_revocations(self) -> None:
+        """Revoke every delegation whose minter no longer holds ALL the tools it granted.
+
+        Fail-closed and all-or-nothing per macaroon (a macaroon's allowlist cannot be edited without the root
+        key). Runs to a fixpoint so grandchildren fall with their delegator's delegator.
+        """
+        changed = True
+        while changed:
+            changed = False
+            for ident, (parent, tools) in self._lineage.items():
+                if ident in self._revoked_ids:
+                    continue
+                if not all(self.holds(parent, f"tool:{t}") for t in tools):
+                    self._revoked_ids.add(ident)
+                    changed = True
 
     def set_root_grants(self, grants: dict[str, list[str]]) -> None:
         self._root_grants = {k: set(v) for k, v in grants.items()}
@@ -163,6 +184,8 @@ class AuthorityGraph:
     def _macaroon_usable_by(self, holder: str, m: Macaroon) -> bool:
         """Signature ok AND identifier bound to this holder (no rebind)."""
         if _holder_from_identifier(m.identifier) != holder:
+            return False
+        if m.identifier in self._revoked_ids:
             return False
         return self._verify_sig(m)
 
@@ -307,6 +330,7 @@ class AuthorityGraph:
 
         m = self._mint(child, tuple(caveats))
         self._macaroons.setdefault(child, []).append(m)
+        self._lineage[m.identifier] = (parent, frozenset(allowed))
         return m
 
     def holds(self, holder: str, capability: str, *, now: datetime | None = None) -> bool:
