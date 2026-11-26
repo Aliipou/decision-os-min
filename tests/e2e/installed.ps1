@@ -161,7 +161,11 @@ Write-Host "== uninstall"
 & $Cli uninstall 2>&1 | Out-String | Write-Host
 $After = $Configs | ForEach-Object { (Get-FileHash $_).Hash }
 Assert "all 3 configs restored byte for byte" ((Compare-Object $Before $After) -eq $null)
-Assert "real user PATH untouched" ([Environment]::GetEnvironmentVariable("Path", "User") -eq $UserPathBefore)
+$UserPathAfter = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPathAfter -ne $UserPathBefore) {
+    Compare-Object @($UserPathBefore -split ";") @($UserPathAfter -split ";") | ForEach-Object { Write-Host "    user PATH $($_.SideIndicator) $($_.InputObject)" }
+}
+Assert "real user PATH untouched" ($UserPathAfter -eq $UserPathBefore)
 
 Write-Host ""
 if ($script:fails -eq 0) { Write-Host "all Windows end-to-end checks passed"; exit 0 }
