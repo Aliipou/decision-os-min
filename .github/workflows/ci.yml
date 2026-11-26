@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "product/**"]
   pull_request:
 
 jobs:
@@ -27,6 +27,32 @@ jobs:
         run: pytest -q --ignore=tests/test_os_isolation.py --ignore=tests/test_e2e_agent_boundary.py
         env:
           AUTHGATE_BACKEND: python
+
+  gateway-cross-platform:
+    name: Gateway on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]" mcp
+      - name: Gateway tests (MCP proxy, model gateway, installer, dashboard)
+        run: pytest -q tests/gateway
+      - name: One-click installer smoke test (no real configs touched)
+        shell: bash
+        run: |
+          export HOME="$RUNNER_TEMP/home" USERPROFILE="$RUNNER_TEMP/home" APPDATA="$RUNNER_TEMP/home/AppData/Roaming"
+          mkdir -p "$HOME"
+          decision-os install --dry-run
+          decision-os install
+          decision-os policy check
+          decision-os doctor || true
 
   tm-a-isolation:
     name: TM-A OS isolation (agent-noambient-v1)

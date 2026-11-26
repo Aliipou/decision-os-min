@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision OS</title>
+<style>
+:root { --ink:#111; --mute:#666; --line:#ddd; --bg:#fff; --soft:#f5f5f5; }
+@media (prefers-color-scheme: dark) { :root { --ink:#eee; --mute:#999; --line:#333; --bg:#111; --soft:#1b1b1b; } }
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.45 Arial, Helvetica, sans-serif; color:var(--ink); background:var(--bg); }
+header { display:flex; align-items:center; gap:14px; padding:14px 22px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); }
+header h1 { font-size:16px; margin:0; letter-spacing:.02em; }
+.pill { border:1px solid var(--ink); border-radius:999px; padding:1px 10px; font-size:12px; }
+.pill.warn { background:var(--ink); color:var(--bg); }
+.spacer { flex:1; }
+main { max-width:1080px; margin:0 auto; padding:18px 22px 60px; }
+h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--mute); margin:28px 0 10px; }
+.card { border:1px solid var(--ink); border-radius:6px; padding:14px 16px; margin-bottom:12px; }
+.card .what { font-size:15px; font-weight:bold; }
+.card .why { color:var(--mute); margin:4px 0 8px; }
+pre { background:var(--soft); padding:10px; border-radius:4px; overflow:auto; max-height:220px; margin:8px 0; font:12px/1.4 Consolas, Menlo, monospace; white-space:pre-wrap; word-break:break-all; }
+button { font:inherit; border:1px solid var(--ink); background:var(--bg); color:var(--ink); border-radius:4px; padding:6px 12px; cursor:pointer; margin-right:6px; }
+button.primary { background:var(--ink); color:var(--bg); }
+button:hover { opacity:.85; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--mute); font-weight:normal; font-size:12px; }
+td.v, td.t { font-weight:bold; white-space:nowrap; }
+td.t { font-weight:normal; }
+td.r { color:var(--mute); }
+.empty { color:var(--mute); padding:8px 0; }
+.small { font-size:12px; color:var(--mute); }
+code { font-family:Consolas, Menlo, monospace; font-size:12px; }
+</style></head>
+<body>
+<header><h1>Decision OS</h1><span id="mode" class="pill">…</span><span id="chain" class="pill">…</span>
+<span class="spacer"></span><button id="toggle">Switch to observe</button></header>
+<main>
+<div id="perr"></div>
+<h2>Waiting for you</h2><div id="pending"><div class="empty">Nothing is waiting.</div></div>
+<h2>Activity</h2>
+<table><thead><tr><th>Time</th><th>Agent</th><th>Tool</th><th>Verdict</th><th>Ran</th><th>Reason</th></tr></thead><tbody id="audit"></tbody></table>
+<h2>Coverage</h2><div id="coverage"></div>
+<h2>Remembered choices</h2><div id="learned"></div>
+<p class="small">Policy: <code id="ppath"></code>. Approvals are bound to the exact call: same tool, same arguments, same request.</p>
+</main>
+<script>
+const T = new URLSearchParams(location.search).get("t");
+history.replaceState(null, "", "/");
+const H = {"X-DOS-Token": T, "Content-Type": "application/json"};
+const el = (t, a = {}, ...kids) => { const e = document.createElement(t); for (const [k, v] of Object.entries(a)) { if (k === "onclick") e.onclick = v; else e.setAttribute(k, v); } for (const k of kids) e.append(k); return e; };
+const txt = s => document.createTextNode(s == null ? "" : String(s));
+let MODE = "enforce";
+async function post(path, body) { await fetch(path, {method: "POST", headers: H, body: JSON.stringify(body)}); refresh(); }
+function when(ts) { try { return new Date(ts).toLocaleTimeString(); } catch { return ts; } }
+function render(s) {
+  MODE = s.mode;
+  document.getElementById("mode").textContent = s.mode === "observe" ? "observe: nothing is blocked" : "enforcing (" + s.profile + ")";
+  document.getElementById("mode").className = "pill" + (s.mode === "observe" ? " warn" : "");
+  document.getElementById("toggle").textContent = s.mode === "observe" ? "Start enforcing" : "Switch to observe";
+  const ch = document.getElementById("chain"); ch.textContent = s.chain_ok ? "audit chain verified" : "AUDIT CHAIN BROKEN"; ch.className = "pill" + (s.chain_ok ? "" : " warn");
+  document.getElementById("ppath").textContent = s.policy_path;
+  const perr = document.getElementById("perr"); perr.replaceChildren();
+  if (s.policy_error) perr.append(el("div", {class: "card"}, el("div", {class: "what"}, txt("Policy error: every call is refused until this is fixed")), el("pre", {}, txt(s.policy_error))));
+  const p = document.getElementById("pending"); p.replaceChildren();
+  if (!s.pending.length) p.append(el("div", {class: "empty"}, txt("Nothing is waiting.")));
+  for (const r of s.pending) {
+    const left = Math.max(0, Math.round((Date.parse(r.created) / 1000 + (r.expires_in_s || 120)) - s.now));
+    const btns = el("div", {},
+      el("button", {class: "primary", onclick: () => post("/api/resolve", {id: r.id, decision: "approve"})}, txt("Allow once")),
+      ...(r.rememberable ? [el("button", {onclick: () => post("/api/resolve", {id: r.id, decision: "approve", remember: true})}, txt("Always allow " + r.tool))] : []),
+      el("button", {onclick: () => post("/api/resolve", {id: r.id, decision: "deny"})}, txt("Deny")),
+      ...(r.rememberable ? [el("button", {onclick: () => post("/api/resolve", {id: r.id, decision: "deny", remember: true})}, txt("Always deny"))] : []));
+    p.append(el("div", {class: "card"},
+      el("div", {class: "what"}, txt(r.client + " wants " + r.server + "/" + r.tool + (r.model ? "  (model " + r.model + ")" : ""))),
+      el("div", {class: "why"}, txt(r.reason + "  ·  auto-deny in " + left + "s")),
+      el("pre", {}, txt(r.arguments_preview)), btns));
+  }
+  const a = document.getElementById("audit"); a.replaceChildren();
+  for (const e of s.audit) a.append(el("tr", {}, el("td", {class: "t"}, txt(when(e.ts))), el("td", {class: "t"}, txt((e.actor || "").replace(/^agent:/, ""))), el("td", {}, txt(e.tool)), el("td", {class: "v"}, txt(e.verdict)), el("td", {}, txt(e.executed ? "yes" : "no")), el("td", {class: "r"}, txt((e.reason || "").replace(/ ?\[refused: [^\]]*\]$/, "")))));
+  if (!s.audit.length) a.append(el("tr", {}, el("td", {colspan: 6, class: "empty"}, txt("No tool calls yet."))));
+  const c = document.getElementById("coverage"); c.replaceChildren();
+  const rows = s.coverage.filter(x => x.governed.length || x.ungoverned.length || x.remote.length || x.message);
+  if (!rows.length) c.append(el("div", {class: "empty"}, txt("No MCP client configs found. Run decision-os install.")));
+  else { const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, txt("App")), el("th", {}, txt("Governed")), el("th", {}, txt("Not governed")), el("th", {}, txt("Remote (left as is)"))))); const b = el("tbody");
+    for (const x of rows) b.append(el("tr", {}, el("td", {}, txt(x.client)), el("td", {}, txt(x.governed.join(", ") || "-")), el("td", {}, txt((x.ungoverned.join(", ") || "-") + (x.message ? "  " + x.message : ""))), el("td", {}, txt(x.remote.join(", ") || "-"))));
+    t.append(b); c.append(t); }
+  const l = document.getElementById("learned"); l.replaceChildren();
+  const keys = Object.keys(s.learned);
+  if (!keys.length) l.append(el("div", {class: "empty"}, txt("None. 'Always allow' choices appear here.")));
+  for (const k of keys) { const [cl, sv, tl] = k.split("|"); l.append(el("div", {}, txt("always " + s.learned[k] + ": " + cl + " → " + sv + "/" + tl + "  "), el("button", {onclick: () => post("/api/forget", {key: k})}, txt("Forget")))); }
+}
+async function refresh() { try { const r = await fetch("/api/state", {headers: H}); if (r.ok) render(await r.json()); } catch (e) {} }
+document.getElementById("toggle").onclick = () => post("/api/mode", {mode: MODE === "observe" ? "enforce" : "observe"});
+refresh(); setInterval(refresh, 1500);
+</script></body></html>
