@@ -52,7 +52,24 @@ jobs:
           decision-os install --dry-run
           decision-os install
           decision-os policy check
-          decision-os doctor || true
+          decision-os doctor
+
+  installed-e2e:
+    name: Installed wheel end-to-end (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip wheel --no-deps -w dist .
+      - name: One-line installer on the built wheel, real MCP round trips
+        run: bash tests/e2e/installed.sh dist/*.whl
 
   tm-a-isolation:
     name: TM-A OS isolation (agent-noambient-v1)

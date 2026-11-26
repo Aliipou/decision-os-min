@@ -240,3 +240,28 @@ def test_cli_install_status_uninstall(fake_home, capsys):
     assert cli.main(["doctor"]) in (0, 1)  # upstream commands like npx may be absent here
     assert cli.main(["uninstall"]) == 0
     assert "Restored 7 MCP server(s)" in capsys.readouterr().out
+
+
+def test_wrapper_ignores_the_client_working_directory(fake_home):
+    # A `decision_os_min` folder in the app's cwd must never shadow the gateway.
+    command, args = installer.wrapper(fake_home, "claude-desktop", "fs", "npx", ["-y", "srv"])
+    assert command == sys.executable
+    assert args[:3] == ["-P", "-m", "decision_os_min.gateway"]
+    assert is_wrapped(command, args) and unwrap_args(args) == ("npx", ["-y", "srv"])
+
+
+def test_doctor_checks_the_gateway_imports_in_the_wrapped_interpreter(
+    fake_home, capsys, monkeypatch
+):
+    # The check runs a fresh interpreter: make it see this source tree.
+    monkeypatch.setenv("PYTHONPATH", str(Path(installer.__file__).parents[2]))
+    _setup(Path.home())
+    assert cli.main(["install"]) == 0
+    capsys.readouterr()
+    cli.main(["doctor"])
+    assert "ok    gateway imports in that interpreter" in capsys.readouterr().out
+    state = installer.State(fake_home)
+    state.data["python"] = str(Path(sys.executable).with_name("definitely-not-python"))
+    state.save()
+    assert cli.main(["doctor"]) == 1
+    cli.main(["uninstall"])

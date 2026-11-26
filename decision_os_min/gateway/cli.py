@@ -427,6 +427,21 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     py = state.data.get("python")
     if py:
         line(Path(py).exists(), f"wrapped configs use {py}")
+        # Run the exact launch the apps use, from a neutral directory: a wrapped
+        # server is useless if that interpreter cannot import the gateway.
+        try:
+            r = subprocess.run(
+                [py, "-P", "-c", "import decision_os_min.gateway.mcp_proxy"],
+                cwd=home.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            err = (r.stderr.strip().splitlines() or [""])[-1]
+            good = r.returncode == 0
+            line(good, "gateway imports in that interpreter" + ("" if good else f": {err}"))
+        except (OSError, subprocess.SubprocessError) as exc:
+            line(False, f"cannot run {py}: {exc}")
     return 0 if ok else 1
 
 

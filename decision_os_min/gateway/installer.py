@@ -2,7 +2,7 @@
 
 ``{"command": "npx", "args": ["-y", "server"]}`` becomes
 
-    {"command": "<python>", "args": ["-m", "decision_os_min.gateway", "--home", "<home>",
+    {"command": "<python>", "args": ["-P", "-m", "decision_os_min.gateway", "--home", "<home>",
      "mcp-proxy", "--client", "<client>", "--server", "<name>", "--", "npx", "-y", "server"]}
 
 Every other key (env, cwd, type, disabled, client-specific fields) is kept.
@@ -58,7 +58,10 @@ class FileReport:
 def wrapper(
     home: Home, client: str, server: str, command: str, args: list[str], python: str | None = None
 ) -> tuple[str, list[str]]:
+    # -P: never put the client's working directory on sys.path, so a stray (or
+    # planted) ``decision_os_min`` folder there cannot replace the gateway.
     return python or sys.executable, [
+        "-P",
         "-m",
         MODULE,
         "--home",

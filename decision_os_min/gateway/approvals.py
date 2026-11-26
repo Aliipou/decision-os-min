@@ -288,6 +288,7 @@ def ensure_dashboard(
         started = True
         cmd = [
             sys.executable,
+            "-P",
             "-m",
             "decision_os_min.gateway",
             "--home",

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Decision OS one-line installer for macOS and Linux.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Aliipou/decision-os-min/product/one-click/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Aliipou/decision-os-min/main/install.sh | sh
 #
 # Installs the `decision-os` command in its own environment (uv, else pipx,
 # else pip --user), then runs `decision-os install`, which wraps every MCP
@@ -15,7 +15,7 @@
 # Undo everything with `decision-os uninstall`.
 set -eu
 
-REF="${DECISION_OS_REF:-product/one-click}"
+REF="${DECISION_OS_REF:-main}"
 SRC="${DECISION_OS_SRC:-https://github.com/Aliipou/decision-os-min/archive/refs/heads/${REF}.zip}"
 
 say() { printf '%s\n' "$*"; }
@@ -37,12 +37,18 @@ if command -v uv >/dev/null 2>&1; then
 elif command -v pipx >/dev/null 2>&1; then
   pipx install --force "$SRC"
 else
+  # Own virtual environment: never touches the system Python (PEP 668 safe).
   PY="$(command -v python3 || command -v python || true)"
   [ -n "$PY" ] || fail "needs Python 3.11+ (or uv: https://docs.astral.sh/uv/)"
   "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
     || fail "needs Python 3.11 or newer; found $("$PY" --version 2>&1)"
-  "$PY" -m pip install --user --upgrade "$SRC" || \
-    "$PY" -m pip install --user --upgrade --break-system-packages "$SRC"
+  VENV="${XDG_DATA_HOME:-$HOME/.local/share}/decision-os/venv"
+  "$PY" -m venv "$VENV" >/dev/null 2>&1 || fail "could not create a virtual environment; on Debian/Ubuntu run: sudo apt install python3-venv"
+  "$VENV/bin/python" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+  "$VENV/bin/python" -m pip install --quiet --upgrade "$SRC" || fail "pip install failed"
+  mkdir -p "$HOME/.local/bin"
+  ln -sf "$VENV/bin/decision-os" "$HOME/.local/bin/decision-os"
+  CLI="$VENV/bin/decision-os"
 fi
 
 CLI="${CLI:-$(find_cli || true)}"

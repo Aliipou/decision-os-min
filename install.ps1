@@ -1,6 +1,6 @@
 # Decision OS one-line installer for Windows (PowerShell 5.1 or 7).
 #
-#   irm https://raw.githubusercontent.com/Aliipou/decision-os-min/product/one-click/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Aliipou/decision-os-min/main/install.ps1 | iex
 #
 # Installs the `decision-os` command with uv (installing uv first if needed; uv
 # also provides Python when none is installed), then runs `decision-os install`,
@@ -11,7 +11,7 @@
 # Undo everything with:  decision-os uninstall
 
 $ErrorActionPreference = "Stop"
-$Ref = if ($env:DECISION_OS_REF) { $env:DECISION_OS_REF } else { "product/one-click" }
+$Ref = if ($env:DECISION_OS_REF) { $env:DECISION_OS_REF } else { "main" }
 $Src = if ($env:DECISION_OS_SRC) { $env:DECISION_OS_SRC } else {
     "https://github.com/Aliipou/decision-os-min/archive/refs/heads/$Ref.zip"
 }

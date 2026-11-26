@@ -4,10 +4,10 @@ One command puts the Decision OS kernel in front of every tool your AI agents ca
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/Aliipou/decision-os-min/product/one-click/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Aliipou/decision-os-min/main/install.sh | sh
 
 # Windows (PowerShell), or double-click Install-DecisionOS.cmd
-irm https://raw.githubusercontent.com/Aliipou/decision-os-min/product/one-click/install.ps1 | iex
+irm https://raw.githubusercontent.com/Aliipou/decision-os-min/main/install.ps1 | iex
 ```
 
 Then restart your AI apps. To undo everything: `decision-os uninstall`.
