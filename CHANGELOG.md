@@ -6,6 +6,16 @@ may change before `1.0`.
 
 ## Unreleased
 
+### Gateway: one command for every agent and every model (`decision_os_min.gateway`)
+- `decision-os install` wraps every stdio MCP server of 13 apps (Claude Desktop, Claude Code, Cursor, VS Code, Copilot CLI, Windsurf, Gemini CLI, Codex, LM Studio, Kiro, Amazon Q, Cline, Roo Code) behind `decision-os mcp-proxy`. Atomic, verified, backed-up writes; `uninstall` restores byte for byte when the app has not edited the file since.
+- MCP proxy: every `tools/call` becomes a governed action; the forward to the real server is the executor's effect. Refusals return `isError` results; hard-denied tools are hidden from `tools/list`; server-initiated requests, notifications, batches and cancellation pass through.
+- Model gateway (`decision-os run -- <agent>`, `decision-os llm`): gates tool calls in OpenAI Chat Completions, OpenAI Responses and Anthropic Messages, streamed or not, for any OpenAI-compatible upstream.
+- TOML policy (allow / ask / deny rules with argument globs and redaction, three profiles, observe mode) compiled into a trusted `AuthorityPDP`; a deterministic guardrail pack as a veto-only evaluator; self-protection of the gateway's own state and every MCP client config.
+- Human approvals bound to the action fingerprint; local dashboard (`decision-os ui`) and terminal (`decision-os approve`); remembered choices.
+- `LockedHashLog`: one hash chain shared safely by many processes.
+- One-click installers: `install.sh`, `install.ps1`, `Install-DecisionOS.cmd`.
+- The kernel, executor, audit and spent-store modules are unchanged; the gateway only consumes their public API.
+
 - `DecisionOS` accepts `key_path` and `spent_store`; signing-key creation is race-safe (`O_EXCL`, mode 0600).
 - Cross-process double-spend tests for `FileSpentStore` and `SqliteSpentStore`; restart and replay tests.
 - `bench/latency.py` (p50/p95/p99); package metadata and `py.typed`; README rewritten; SECURITY.md operational model.

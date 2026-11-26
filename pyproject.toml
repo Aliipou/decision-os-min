@@ -37,12 +37,14 @@ service = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2"]
 
 [project.scripts]
 decision-os-serve = "decision_os_min.service:main"
+decision-os = "decision_os_min.gateway.cli:main"
 
 [tool.setuptools]
-packages = ["decision_os_min"]
+packages = ["decision_os_min", "decision_os_min.gateway"]
 
 [tool.setuptools.package-data]
 decision_os_min = ["py.typed"]
+"decision_os_min.gateway" = ["dashboard.html"]
 
 [tool.ruff]
 line-length = 100

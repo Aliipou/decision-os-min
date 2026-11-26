@@ -20,6 +20,17 @@ outcome = dos.handle(action, tools)   # decide -> sign -> audit -> execute
 
 "OS" here means an execution-governance layer for tool calls. It is not an operating system, and it is not a replacement for general IAM.
 
+## One command for every agent and every model
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Aliipou/decision-os-min/main/install.sh | sh
+# Windows: irm https://raw.githubusercontent.com/Aliipou/decision-os-min/main/install.ps1 | iex
+```
+
+`decision-os install` finds Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI, Codex, LM Studio and the other MCP apps on your machine and puts every one of their MCP servers behind this kernel. `decision-os run -- <agent>` does the same at the model API (OpenAI-compatible and Anthropic, streaming included), which also covers an agent's built-in tools. A short TOML policy says what runs, what asks you, and what never runs; `decision-os ui` is where you approve. `decision-os uninstall` puts every config back.
+
+The gateway adds no new authority: each tool call becomes an `Action`, the kernel signs or refuses it, and the forward to the real tool runs inside the executor. Details, policy reference and limits: [docs/GATEWAY.md](docs/GATEWAY.md).
+
 ## What you get
 
 | Property | How it works |
@@ -37,9 +48,13 @@ outcome = dos.handle(action, tools)   # decide -> sign -> audit -> execute
 Python 3.11 or newer.
 
 ```bash
-pip install decision-os-min              # core (stdlib + cryptography)
-pip install "decision-os-min[service]"   # adds the optional HTTP service
+pip install "decision-os-min @ git+https://github.com/Aliipou/decision-os-min"              # core (stdlib + cryptography)
+pip install "decision-os-min[service] @ git+https://github.com/Aliipou/decision-os-min"     # adds the optional HTTP service
 ```
+
+Not on PyPI yet; these install straight from GitHub.
+
+The gateway (`decision-os` command) ships in the core package and needs nothing extra.
 
 Govern tools with a decorator:
 
