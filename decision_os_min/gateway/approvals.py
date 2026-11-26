@@ -47,6 +47,16 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _stale(rec: dict[str, Any], grace_s: float = 5.0) -> bool:
+    """A pending request whose waiter is gone: past its approval timeout. This
+    happens when the app kills the proxy mid-wait, so nobody marks it expired."""
+    try:
+        created = datetime.fromisoformat(rec["created"]).timestamp()
+        return time.time() > created + float(rec.get("expires_in_s") or 120) + grace_s
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 class ApprovalStore:
     def __init__(self, home: Home) -> None:
         self.home = home
@@ -87,6 +97,10 @@ class ApprovalStore:
             if rec is None:
                 raise KeyError(fp)
             if rec.get("status") != PENDING:
+                return rec
+            if _stale(rec):  # nobody is waiting: approving it would only arm a ghost
+                rec.update(status=EXPIRED, resolved=_now(), resolved_by="gateway")
+                write_private(self._path(fp), json.dumps(rec, indent=2))
                 return rec
             rec.update(status=decision, resolved=_now(), resolved_by=by, remember=remember)
             write_private(self._path(fp), json.dumps(rec, indent=2))
@@ -134,7 +148,7 @@ class ApprovalStore:
                 rec = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if rec.get("status") == PENDING:
+            if rec.get("status") == PENDING and not _stale(rec):
                 out.append(rec)
         return sorted(out, key=lambda r: r.get("created", ""))
 
@@ -222,31 +236,51 @@ class LearnedStore:
 # --------------------------------------------------------------- side effects
 
 
-def notify(title: str, body: str) -> None:
-    """Best-effort desktop notification. Never raises, never blocks."""
+_PS_NOTIFY = (
+    "Add-Type -AssemblyName System.Windows.Forms;"
+    "$n=New-Object System.Windows.Forms.NotifyIcon;"
+    "$n.Icon=[System.Drawing.SystemIcons]::Shield;$n.Visible=$true;"
+    "$n.ShowBalloonTip(8000,$env:DECISION_OS_NOTIFY_TITLE,$env:DECISION_OS_NOTIFY_BODY,'Warning');"
+    "Start-Sleep -Seconds 9;$n.Dispose()"
+)
+_OSA_NOTIFY = (
+    "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
+)
+
+
+def notify_command(
+    title: str, body: str, platform: str | None = None
+) -> tuple[list[str] | None, dict[str, str] | None]:
+    """The notification command for ``platform``; the script text is constant."""
     body = body[:200]
+    platform = platform or ("win32" if os.name == "nt" else sys.platform)
+    if platform == "darwin":
+        return ["osascript", "-e", _OSA_NOTIFY, title, body], None
+    if platform == "win32":
+        env = {**os.environ, "DECISION_OS_NOTIFY_TITLE": title, "DECISION_OS_NOTIFY_BODY": body}
+        return ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", _PS_NOTIFY], env
+    if shutil.which("notify-send"):
+        return ["notify-send", "--app-name=Decision OS", "--", title, body], None
+    return None, None
+
+
+def notify(title: str, body: str) -> None:
+    """Best-effort desktop notification. Never raises, never blocks.
+
+    ``body`` carries agent-chosen text (the tool name), so it is passed as data,
+    never spliced into a script: argv for osascript and notify-send, environment
+    variables for PowerShell, whose double-quoted strings would run ``$(...)``.
+    """
+    cmd, env = notify_command(title, body)
+    if not cmd:
+        return
     try:
-        if sys.platform == "darwin":
-            script = f"display notification {json.dumps(body)} with title {json.dumps(title)}"
-            cmd = ["osascript", "-e", script]
-        elif os.name == "nt":
-            ps = (
-                "Add-Type -AssemblyName System.Windows.Forms;"
-                "$n=New-Object System.Windows.Forms.NotifyIcon;"
-                "$n.Icon=[System.Drawing.SystemIcons]::Shield;$n.Visible=$true;"
-                f"$n.ShowBalloonTip(8000,{json.dumps(title)},{json.dumps(body)},'Warning');"
-                "Start-Sleep -Seconds 9;$n.Dispose()"
-            )
-            cmd = ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps]
-        elif shutil.which("notify-send"):
-            cmd = ["notify-send", "--app-name=Decision OS", title, body]
-        else:
-            return
         subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
             start_new_session=(os.name != "nt"),
         )
     except Exception:

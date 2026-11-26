@@ -71,6 +71,25 @@ jobs:
       - name: One-line installer on the built wheel, real MCP round trips
         run: bash tests/e2e/installed.sh dist/*.whl
 
+  installed-e2e-windows:
+    name: Installed wheel end-to-end (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: python -m pip wheel --no-deps -w dist .
+      - name: Install-DecisionOS.cmd in a throwaway profile, real MCP round trips
+        shell: powershell
+        run: |
+          $whl = (Get-ChildItem dist\*.whl).FullName
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\e2e\installed.ps1 -Src $whl -RealNpx
+          exit $LASTEXITCODE
+
   tm-a-isolation:
     name: TM-A OS isolation (agent-noambient-v1)
     runs-on: ubuntu-latest

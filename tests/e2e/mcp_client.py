@@ -1,6 +1,7 @@
 """Launch an MCP server exactly as an app's config file says, then call tools.
 
 mcp_client.py CONFIG KEY.PATH '[["tool", {"arg": 1}], ...]'
+mcp_client.py CONFIG KEY.PATH @calls.json
 """
 
 import json
@@ -9,8 +10,12 @@ import subprocess
 import sys
 import threading
 
-cfg_path, key, calls = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
-with open(cfg_path) as f:
+cfg_path, key, raw = sys.argv[1], sys.argv[2], sys.argv[3]
+if raw.startswith("@"):
+    with open(raw[1:], encoding="utf-8") as f:
+        raw = f.read()
+calls = json.loads(raw)
+with open(cfg_path, encoding="utf-8") as f:
     entry = json.load(f)
 for part in key.split("."):
     entry = entry[part]
