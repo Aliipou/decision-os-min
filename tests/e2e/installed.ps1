@@ -14,7 +14,9 @@ $ErrorActionPreference = "Continue"
 $E2E = $PSScriptRoot
 $Repo = (Resolve-Path "$E2E\..\..").Path
 $Py = (Get-Command python).Source
-$UserPathBefore = [Environment]::GetEnvironmentVariable("Path", "User")
+# Raw registry value: entries like %USERPROFILE%\x must not expand against the sandbox.
+function Get-UserPathRaw { (Get-Item HKCU:\Environment).GetValue("Path", "", "DoNotExpandEnvironmentNames") }
+$UserPathBefore = Get-UserPathRaw
 
 $Root = Join-Path ([IO.Path]::GetTempPath()) ("dos-e2e-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -ItemType Directory -Force $Root | Out-Null
@@ -161,7 +163,7 @@ Write-Host "== uninstall"
 & $Cli uninstall 2>&1 | Out-String | Write-Host
 $After = $Configs | ForEach-Object { (Get-FileHash $_).Hash }
 Assert "all 3 configs restored byte for byte" ((Compare-Object $Before $After) -eq $null)
-$UserPathAfter = [Environment]::GetEnvironmentVariable("Path", "User")
+$UserPathAfter = Get-UserPathRaw
 if ($UserPathAfter -ne $UserPathBefore) {
     Compare-Object @($UserPathBefore -split ";") @($UserPathAfter -split ";") | ForEach-Object { Write-Host "    user PATH $($_.SideIndicator) $($_.InputObject)" }
 }
