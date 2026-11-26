@@ -17,10 +17,15 @@ fails=0
 check() { if grep -qF -- "$2" <<<"$3"; then echo "  pass  $1"; else echo "  FAIL  $1 (wanted: $2)"; fails=$((fails + 1)); fi; }
 
 PY="$(command -v python3)"
-mkdir -p "$HOME/.config/Claude" "$HOME/.ssh" "$HOME/work"
+export XDG_CONFIG_HOME="$HOME/.config"  # CI runners set their own
+case "$(uname -s)" in
+  Darwin) APPDIR="$HOME/Library/Application Support" ;;
+  *) APPDIR="$XDG_CONFIG_HOME" ;;
+esac
+mkdir -p "$APPDIR/Claude" "$HOME/.ssh" "$HOME/work"
 echo "PRIVATE KEY" > "$HOME/.ssh/id_rsa"
 echo "hello from notes" > "$HOME/work/notes.txt"
-DESKTOP="$HOME/.config/Claude/claude_desktop_config.json"
+DESKTOP="$APPDIR/Claude/claude_desktop_config.json"
 echo "{\"mcpServers\": {\"files\": {\"command\": \"$PY\", \"args\": [\"$E2E/mcp_server.py\"]}}}" > "$DESKTOP"
 echo "{\"numStartups\": 3, \"mcpServers\": {\"tools\": {\"command\": \"$PY\", \"args\": [\"$E2E/mcp_server.py\"]}}}" > "$HOME/.claude.json"
 before="$(cat "$DESKTOP" "$HOME/.claude.json" | sha256sum)"
@@ -39,13 +44,15 @@ out="$(call "$DESKTOP" mcpServers.files '[
  ["write_file", {"path": "'"$HOME"'/work/t.txt", "content": "ghp_abcdefghijklmnopqrstuvwxyz0123456789"}]
 ]')"
 echo "$out"
+check "Claude Desktop server launched through the gateway" "'mcp-proxy', '--client', 'claude-desktop'" "$out"
 check "tools listed through the proxy" "TOOLS: ['read_file', 'write_file', 'run_command']" "$out"
 check "read-only call runs" "-> OK: hello from notes" "$out"
 check "credential path blocked" "protected credentials path" "$out"
 check "catastrophic command blocked" "recursive delete" "$out"
 check "secret in arguments blocked" "contains a GitHub token" "$out"
-out="$(call "$HOME/.claude.json" mcpServers.tools '[["read_file", {"path": "'"$HOME"'/work/notes.txt"}]]')"
-check "second app governed too" "-> OK: hello from notes" "$out"
+out="$(call "$HOME/.claude.json" mcpServers.tools '[["run_command", {"command": "rm -rf ~"}]]')"
+check "Claude Code server launched through the gateway" "'mcp-proxy', '--client', 'claude-code'" "$out"
+check "Claude Code governed too" "recursive delete" "$out"
 
 echo "== human approval"
 call "$DESKTOP" mcpServers.files '[["write_file", {"path": "'"$HOME"'/work/a.txt", "content": "approved"}]]' >"$HOME/a.out" &
@@ -59,7 +66,7 @@ check "denied write refused" "denied by you" "$(cat "$HOME/b.out")"
 echo "== only allowed calls reached the server"
 cat "$E2E_SERVER_LOG"
 n="$(grep -c EXECUTED "$E2E_SERVER_LOG")"
-[ "$n" = 3 ] && echo "  pass  3 executions (2 reads, 1 approved write)" || { echo "  FAIL  $n executions"; fails=$((fails + 1)); }
+[ "$n" = 2 ] && echo "  pass  2 executions (1 read, 1 approved write)" || { echo "  FAIL  $n executions"; fails=$((fails + 1)); }
 check "audit chain verifies" "chain verified" "$(decision-os audit --verify)"
 
 echo "== uninstall"

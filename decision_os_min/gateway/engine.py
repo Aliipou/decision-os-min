@@ -32,6 +32,7 @@ from ..spentstore import SqliteSpentStore
 from .approvals import APPROVED, ApprovalStore, LearnedStore, ensure_dashboard, notify
 from .audit import LockedHashLog
 from .guardrails import Guardrails, redact_secrets
+from .locking import file_lock
 from .paths import Home, write_private
 from .policy import GatewayPolicy, PolicyError, evaluate, load_policy
 
@@ -139,7 +140,10 @@ class Gateway:
         self.approvals = ApprovalStore(self.home)
         self.learned = LearnedStore(self.home)
         self.log = LockedHashLog(self.home.audit, self.home.locks / "audit.lock")
-        self._spent = SqliteSpentStore(self.home.spent)
+        # Every app starts several proxies at once; SQLite can fail the WAL switch
+        # on a brand-new database with "database is locked" instead of waiting.
+        with file_lock(self.home.locks / "spent.lock"):
+            self._spent = SqliteSpentStore(self.home.spent)
         self._lock = threading.RLock()
         self.policy: GatewayPolicy | None = None
         self.policy_error: str | None = None
